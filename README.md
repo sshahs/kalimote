@@ -19,6 +19,7 @@ Pair once with the code on your TV screen. No developer mode, no ADB, nothing to
 [Web remote](#-web-remote) ·
 [Features](#-features) ·
 [Macros](#-macros) ·
+[Jellyfin](#-jellyfin) ·
 [REST API](#-rest-api--home-automation) ·
 [FAQ](#-troubleshooting)
 
@@ -46,6 +47,7 @@ Pair once with the code on your TV screen. No developer mode, no ADB, nothing to
 | 🔗 | **Open any link on the TV**: paste a YouTube or Netflix URL | ✅ | ✅ |
 | 📤 | **Share to TV** from any app's share sheet | | ✅ |
 | 🧩 | **Macros**: chain keys, waits, text and links into one button | ✅ | ✅ |
+| 🪼 | **Jellyfin mode**: extra buttons when Jellyfin (incl. debug builds) is on screen, plus now-playing, seek and track switching with your server | ✅ | ✅ |
 | 🌙 | **Sleep timer**: turns the TV off later, only if it's on | ✅ | ✅ |
 | ⚡ | **Wake-on-LAN** for TVs that drop off the network when off | ✅ (MAC auto-detected) | ✅ |
 | 📺 | Shows the **app playing** on the TV and its power state | ✅ | ✅ |
@@ -176,6 +178,25 @@ ENTER
 ```
 </details>
 
+## 🪼 Jellyfin
+
+<img src="docs/screenshots/jellyfin.png" width="260" align="right" alt="Jellyfin panel">
+
+When the TV reports that **Jellyfin** is in the foreground, Kalimote adds a Jellyfin panel to the remote. That covers `org.jellyfin.androidtv`, the **debug build** `org.jellyfin.androidtv.debug` (marked with a *DEBUG* badge) and the Jellyfin mobile app.
+
+**With no setup**, you get Jellyfin-friendly buttons: skip back/forward, subtitles, audio track, player options, info, stop and search.
+
+**Connect your Jellyfin server** (⚙ in the panel, or *TVs → Jellyfin*) with its URL and an API key from *Dashboard → API Keys*. You then get:
+
+- a **now-playing card** with poster, series/episode and live progress
+- a **draggable seek bar** plus exact **−10 s / +30 s**, previous/next and stop
+- **audio and subtitle track pickers**
+- **Message TV…** to pop a notice up on the screen
+
+Kalimote finds the TV's Jellyfin session by IP address. On the web remote the API key stays on the Kalimote server and is never sent to browsers.
+
+<br clear="right">
+
 ## 🏠 REST API & home automation
 
 The web server exposes a small JSON API, so Home Assistant, iOS Shortcuts, Tasker or a shell script can drive your TV. `:device` is the device id **or its name**.
@@ -192,6 +213,8 @@ The web server exposes a small JSON API, so Home Assistant, iOS Shortcuts, Taske
 | `POST /api/devices/:device/volume` | `{"level": 15}` | Set absolute volume |
 | `POST /api/devices/:device/sleep` | `{"minutes": 30}` | Sleep timer (`0` cancels) |
 | `POST /api/devices/:device/macro` | `{"name": "Bedtime"}` or `{"script": "HOME, wait 1s"}` | Run a macro |
+| `GET /api/devices/:device/jellyfin` | | What Jellyfin is playing on the TV |
+| `POST /api/devices/:device/jellyfin` | `{"action": "seekBy", "value": 30000}` | `playpause` `stop` `next` `previous` `seek` `seekBy` `subtitle` `audio` `message` |
 
 ```bash
 curl -X POST http://kalimote.local:8080/api/devices/Living%20Room%20TV/power \
@@ -249,6 +272,7 @@ Browsers can't open raw TLS sockets, so the web remote goes through a small Node
 | Android app | [`android/app`](android/app) | Kotlin + Jetpack Compose + Material 3 |
 | Protocol library | [`android/atvremote`](android/atvremote) | Pure Kotlin/JVM, no Android or protobuf dependencies |
 | Mock TV | [`server/test/mock-tv.js`](server/test/mock-tv.js) | Implements the TV side, used by both test suites |
+| Mock Jellyfin | [`server/test/mock-jellyfin.js`](server/test/mock-jellyfin.js) | Fake Jellyfin API with a shared session fixture, used by both test suites |
 
 <details>
 <summary><b>The protocol in detail</b></summary>
