@@ -50,6 +50,11 @@ Pair once with the code on your TV screen. No developer mode, no ADB, nothing to
 | ⚡ | **Wake-on-LAN** for TVs that drop off the network when off | ✅ (MAC auto-detected) | ✅ |
 | 📺 | Shows the **app playing** on the TV and its power state | ✅ | ✅ |
 | 🔘 | Phone **volume buttons** control the TV | | ✅ |
+| 🧱 | **Home-screen widget**: power, volume, play/pause, mute without opening the app | | ✅ |
+| 🎛️ | **Quick Settings tiles** for TV power and play/pause | | ✅ |
+| 📌 | **Launcher shortcuts** (long-press the icon): power, play/pause and your macros | | ✅ |
+| 🎤 | **Voice typing** into TV search boxes | | ✅ |
+| 💾 | **Backup and restore** of macros and app shortcuts as JSON | | ✅ |
 | ⌨️ | Desktop **keyboard shortcuts** | ✅ | |
 | 🏠 | **REST API** for Home Assistant, iOS Shortcuts, curl | ✅ | |
 | 🖥️ | Several TVs, auto-reconnect, light/dark theme, installable PWA | ✅ | ✅ |
@@ -71,7 +76,9 @@ Pair once with the code on your TV screen. No developer mode, no ADB, nothing to
 2. Open Kalimote on the same Wi-Fi as your TV. Your TV appears under **Found on your network**.
 3. Tap **Pair** and type the code shown on the TV. Done.
 
-> **Tip:** in YouTube, Netflix or your browser, tap **Share → Open on TV** to play that link on the TV.
+> **Tips:**
+> - In YouTube, Netflix or your browser, tap **Share → Open on TV** to play that link on the TV.
+> - Go to **TVs → Quick controls** to add the home-screen widget and Quick Settings tiles in one tap.
 
 ### 🌐 Web remote
 
@@ -329,7 +336,6 @@ Android batches alarms to save battery, so the timer can fire a minute or two la
 ## 🗺️ Roadmap
 
 - [ ] Voice search (stream the mic to the TV's Assistant)
-- [ ] Home-screen widget and quick-settings tile on Android
 - [ ] Pre-built Docker image
 
 Ideas and bug reports are welcome. [Open an issue](https://github.com/sshahs/kalimote/issues).
