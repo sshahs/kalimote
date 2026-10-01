@@ -92,7 +92,7 @@ cd android
 adb install app/build/outputs/apk/debug/app-debug.apk
 ```
 
-Minimum Android version: 7.0 (API 24). The phone must be on the same Wi-Fi
+Minimum Android version: 8.0 (API 26). The phone must be on the same Wi-Fi
 network as the TV.
 
 The protocol library builds and tests without the Android SDK:

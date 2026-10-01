@@ -48,14 +48,11 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.kalimote.atvremote.Direction
 import dev.kalimote.atvremote.KeyCodes
-import kotlinx.coroutines.coroutineScope
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
 import kotlin.math.abs
 
 /**
- * Press handling for remote buttons: fires on touch-down for responsiveness and,
- * when [repeat] is set, keeps firing while held (D-pad, volume).
+ * Press handling for remote buttons. With [repeat] (D-pad, volume) it fires on
+ * touch-down and keeps firing while held; otherwise it fires on release.
  */
 fun Modifier.remotePress(
     label: String,
@@ -72,21 +69,17 @@ fun Modifier.remotePress(
         awaitEachGesture {
             awaitFirstDown()
             onPressedChange(true)
-            onPress()
             if (repeat) {
-                coroutineScope {
-                    val job = launch {
-                        delay(400)
-                        while (true) {
-                            onPress()
-                            delay(110)
-                        }
-                    }
-                    waitForUpOrCancellation()
-                    job.cancel()
+                onPress()
+                // Fire again every 110ms after an initial 400ms, until released.
+                var wait = 400L
+                while (withTimeoutOrNull(wait) { waitForUpOrCancellation(); true } == null) {
+                    onPress()
+                    wait = 110L
                 }
-            } else {
-                waitForUpOrCancellation()
+            } else if (waitForUpOrCancellation() != null) {
+                // Fire on release so a scroll that starts on a button sends nothing.
+                onPress()
             }
             onPressedChange(false)
         }
