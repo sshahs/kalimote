@@ -32,6 +32,10 @@
       <button class="pill" data-key="SETTINGS" aria-label="Settings" title="Settings">
         <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3" /><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M4.9 19.1 7 17M17 7l2.1-2.1" /></svg>
       </button>
+      <button class="pill" id="sleep-btn" aria-label="Sleep timer" title="Sleep timer">
+        <svg viewBox="0 0 24 24"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z" /></svg>
+        <span class="badge" id="sleep-badge" hidden></span>
+      </button>
       <button class="pill" id="touchpad-toggle" title="Switch between D-pad and touchpad" aria-pressed="false">
         <svg viewBox="0 0 24 24"><rect x="4" y="3" width="16" height="18" rx="3" /><path d="M9 9l3-3 3 3M9 15l3 3 3-3" /></svg>
       </button>
@@ -60,7 +64,7 @@
     <section class="row rockers">
       <div class="rocker">
         <button data-key="VOLUME_UP" data-repeat aria-label="Volume up">+</button>
-        <span class="rocker-label" id="volume-label">VOL</span>
+        <button class="rocker-label" id="volume-label" title="Set volume">VOL</button>
         <button data-key="VOLUME_DOWN" data-repeat aria-label="Volume down">−</button>
       </div>
       <div class="middle-col">
@@ -106,6 +110,15 @@
     <section class="apps">
       <h2>Apps <span class="now-playing" id="current-app"></span></h2>
       <div class="app-grid" id="app-grid"></div>
+      <form class="link-form" id="link-form">
+        <input name="url" type="url" placeholder="Paste a YouTube / Netflix / any link to open on TV" autocomplete="off" required>
+        <button class="primary">Open</button>
+      </form>
+    </section>
+
+    <section class="apps">
+      <h2>Macros <span class="now-playing" id="macro-status"></span></h2>
+      <div class="app-grid" id="macro-grid"></div>
     </section>
   </main>
 
@@ -148,6 +161,73 @@
         <button type="button" data-key="DEL">⌫ Delete</button>
         <button type="button" data-key="ENTER">⏎ Enter</button>
         <button class="primary">Send</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="sleep-dialog">
+    <form method="dialog">
+      <h2>Sleep timer</h2>
+      <p class="hint" id="sleep-status">Turn the TV off after…</p>
+      <div class="choice-grid">
+        <button value="15">15 min</button><button value="30">30 min</button><button value="45">45 min</button>
+        <button value="60">1 hour</button><button value="90">1½ hours</button><button value="120">2 hours</button>
+      </div>
+      <div class="actions">
+        <button value="0" id="sleep-cancel">Turn off timer</button>
+        <button value="">Close</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="volume-dialog">
+    <form method="dialog">
+      <h2>Volume <span id="volume-value"></span></h2>
+      <input type="range" id="volume-range" min="0" max="100" step="1">
+      <div class="actions">
+        <button value="">Close</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="macro-dialog">
+    <form id="macro-form">
+      <h2 id="macro-title">New macro</h2>
+      <input name="name" placeholder="Name, e.g. Netflix &amp; chill" required autocomplete="off">
+      <textarea name="script" rows="7" spellcheck="false" required placeholder="HOME&#10;wait 1s&#10;DPAD_DOWN x2&#10;DPAD_CENTER"></textarea>
+      <details class="hint">
+        <summary>Syntax</summary>
+        One step per line (or comma separated):
+        <code>HOME</code> press a key ·
+        <code>DPAD_DOWN x3</code> repeat ·
+        <code>hold DPAD_CENTER 1s</code> long press ·
+        <code>wait 500</code> / <code>wait 2s</code> ·
+        <code>text hello</code> type text ·
+        <code>open https://…</code> open a link.
+        Keys: HOME BACK MENU DPAD_UP/DOWN/LEFT/RIGHT/CENTER VOLUME_UP/DOWN VOLUME_MUTE POWER MEDIA_PLAY_PAUSE MEDIA_NEXT CHANNEL_UP DIGIT_0–9 SETTINGS TV_INPUT SEARCH ASSIST…
+      </details>
+      <p class="error" id="macro-error"></p>
+      <div class="actions">
+        <button type="button" id="macro-delete" hidden>Delete</button>
+        <button type="button" id="macro-test">Try it</button>
+        <button type="button" id="macro-cancel">Cancel</button>
+        <button class="primary">Save</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="edit-dialog">
+    <form id="edit-form">
+      <h2>Edit TV</h2>
+      <label class="field">Name <input name="name" required autocomplete="off"></label>
+      <label class="field">MAC address (for Wake-on-LAN)
+        <input name="mac" placeholder="aa:bb:cc:dd:ee:ff" autocomplete="off" spellcheck="false">
+      </label>
+      <p class="hint">Filled in automatically once the server has talked to the TV (Linux servers). Needed to turn on TVs that drop off the network when off.</p>
+      <p class="error" id="edit-error"></p>
+      <div class="actions">
+        <button type="button" id="edit-cancel">Cancel</button>
+        <button class="primary">Save</button>
       </div>
     </form>
   </dialog>

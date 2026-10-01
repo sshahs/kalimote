@@ -62,6 +62,8 @@ async function handle(manager, msg) {
       return manager.add(msg);
     case 'rename':
       return manager.rename(device, msg.name);
+    case 'update':
+      return manager.update(device, { name: msg.name, mac: msg.mac });
     case 'remove':
       return manager.remove(device);
     case 'pair.start':
@@ -78,8 +80,93 @@ async function handle(manager, msg) {
       return manager.live(device).sendText(msg.text);
     case 'launch':
       return manager.live(device).launchApp(msg.url);
+    case 'power':
+      return manager.power(device, msg.state);
+    case 'wake':
+      return manager.wake(device);
+    case 'volume':
+      return manager.setVolume(device, msg.level);
+    case 'sleep':
+      return manager.setSleepTimer(device, msg.minutes);
+    case 'macro.save':
+      return manager.saveMacro({ id: msg.macroId, name: msg.name, script: msg.script });
+    case 'macro.delete':
+      return manager.deleteMacro(msg.macro);
+    case 'macro.run':
+      return manager.runMacro(device, { macro: msg.macro, script: msg.script });
+    case 'macro.stop':
+      return manager.stopMacro(device);
     default:
       throw new Error(`Unknown operation: ${op}`);
+  }
+}
+
+function readBody(req, limit = 64 * 1024) {
+  return new Promise((resolve, reject) => {
+    let size = 0;
+    const chunks = [];
+    req.on('data', (c) => {
+      size += c.length;
+      if (size > limit) {
+        reject(Object.assign(new Error('Body too large'), { status: 413 }));
+        req.destroy();
+      } else chunks.push(c);
+    });
+    req.on('end', () => {
+      const raw = Buffer.concat(chunks).toString('utf8');
+      if (!raw) return resolve({});
+      try {
+        resolve(JSON.parse(raw));
+      } catch {
+        reject(Object.assign(new Error('Body must be JSON'), { status: 400 }));
+      }
+    });
+    req.on('error', reject);
+  });
+}
+
+/**
+ * REST API for automation (Home Assistant, iOS Shortcuts, curl):
+ *   GET  /api/devices
+ *   POST /api/devices/:device/{key,text,open,power,wake,volume,sleep,macro}
+ * :device is the device id or its name. Auth: "Authorization: Bearer <token>"
+ * or ?token=, when KALIMOTE_TOKEN is set.
+ */
+async function handleApi(manager, req, res, url) {
+  const send = (status, body) => {
+    res.writeHead(status, { 'content-type': 'application/json' }).end(JSON.stringify(body));
+  };
+  try {
+    const parts = url.pathname.split('/').filter(Boolean).map(decodeURIComponent); // ['api', 'devices', id, action]
+    if (parts[1] === 'devices' && parts.length === 2 && req.method === 'GET') {
+      const { devices, macros } = manager.list();
+      return send(200, { devices, macros });
+    }
+    if (parts[1] === 'devices' && parts.length === 3 && req.method === 'GET') {
+      const id = manager.get(parts[2]).id;
+      return send(200, manager.list().devices.find((d) => d.id === id));
+    }
+    if (parts[1] === 'devices' && parts.length === 4 && req.method === 'POST') {
+      const device = manager.get(parts[2]).id;
+      const body = await readBody(req);
+      const action = parts[3];
+      const ops = {
+        key: () => manager.live(device).sendKey(body.key, body.direction ?? 'SHORT'),
+        text: () => manager.live(device).sendText(body.text),
+        open: () => manager.live(device).launchApp(body.url),
+        power: () => manager.power(device, body.state ?? 'toggle'),
+        wake: () => manager.wake(device),
+        volume: () => manager.setVolume(device, body.level),
+        sleep: () => manager.setSleepTimer(device, body.minutes ?? 0),
+        macro: () => manager.runMacro(device, { macro: body.name ?? body.macro, script: body.script }),
+      };
+      if (!ops[action]) return send(404, { ok: false, error: `Unknown action: ${action}` });
+      const result = await ops[action]();
+      return send(200, { ok: true, result: result ?? null });
+    }
+    return send(404, { ok: false, error: 'Not found' });
+  } catch (e) {
+    return send(e.status ?? 400, { ok: false, error: e.message });
   }
 }
 
@@ -87,6 +174,16 @@ export function createServer({ manager, token }) {
   const server = http.createServer((req, res) => {
     if (req.url === '/healthz') {
       res.writeHead(200, { 'content-type': 'text/plain' }).end('ok');
+      return;
+    }
+    const url = new URL(req.url, 'http://localhost');
+    if (url.pathname.startsWith('/api/')) {
+      const bearer = /^Bearer\s+(.+)$/i.exec(req.headers.authorization ?? '')?.[1];
+      if (!tokenMatches(token, bearer ?? url.searchParams.get('token'))) {
+        res.writeHead(401, { 'content-type': 'application/json' }).end('{"ok":false,"error":"Unauthorized"}');
+        return;
+      }
+      handleApi(manager, req, res, url);
       return;
     }
     serveStatic(req, res);

@@ -37,6 +37,7 @@ const state = {
   connected: false,
   touchpad: store.get('touchpad', false),
   apps: store.get('apps', DEFAULT_APPS),
+  macros: [],
   pairingDevice: null,
 };
 
@@ -66,6 +67,10 @@ function connectSocket() {
     if (msg.event === 'devices') {
       state.devices = msg.devices;
       state.discovered = msg.discovered;
+      if (JSON.stringify(msg.macros ?? []) !== JSON.stringify(state.macros)) {
+        state.macros = msg.macros ?? [];
+        renderMacros();
+      }
       render();
     } else if (msg.re && pending.has(msg.re)) {
       const { resolve, reject } = pending.get(msg.re);
@@ -118,6 +123,11 @@ function sendKey(key, direction = 'SHORT') {
     return;
   }
   if (!d.state?.connected) {
+    // The power button can wake a TV that dropped off the network.
+    if (key === 'POWER' && d.paired && d.mac) {
+      call('wake', { device: d.id }).then(() => toast('Wake-on-LAN sent'), report);
+      return;
+    }
     toast(d.paired ? 'TV is not connected' : 'Pair this TV first');
     return;
   }
@@ -362,10 +372,7 @@ function renderManage() {
                 }, 'primary')
               : button('Connect', () => call('connect', { device: d.id }).catch(report))
             : button('Pair', () => startPairing(d), 'primary'),
-          button('Rename', () => {
-            const name = prompt('Name', d.name);
-            if (name) call('rename', { device: d.id, name }).catch(report);
-          }),
+          button('Edit', () => openEdit(d)),
           button('✕', () => {
             if (confirm(`Remove ${d.name}?`)) call('remove', { device: d.id }).catch(report);
           }),
@@ -525,6 +532,9 @@ function render() {
   else if (d.paired && !connected) {
     bannerContent = [
       d.error ? `${d.name}: ${d.error}` : `Connecting to ${d.name}…`,
+      ...(d.mac
+        ? [button('Wake TV', () => call('wake', { device: d.id }).then(() => toast('Wake-on-LAN sent'), report), 'primary')]
+        : []),
       button('Retry', () => call('connect', { device: d.id }).catch(report)),
     ];
   }
@@ -540,6 +550,16 @@ function render() {
   const powerState = d?.state?.powered === false ? ' · Off' : '';
   $('#current-app').textContent = connected ? prettyApp(d.state.currentApp) + powerState : '';
 
+  const sleepLeft = d?.sleepAt ? Math.max(0, Math.ceil((d.sleepAt - Date.now()) / 60000)) : null;
+  $('#sleep-badge').hidden = sleepLeft === null;
+  $('#sleep-badge').textContent = sleepLeft === null ? '' : `${sleepLeft}m`;
+  $('#sleep-status').textContent = sleepLeft === null ? 'Turn the TV off after…' : `TV turns off in ${sleepLeft} min. Change it:`;
+  $('#sleep-cancel').hidden = sleepLeft === null;
+  $('#macro-status').textContent = d?.runningMacro ? `Running “${d.runningMacro}”…` : '';
+  for (const b of document.querySelectorAll('#macro-grid [data-macro]')) {
+    b.classList.toggle('macro-running', state.macros.find((m) => m.id === b.dataset.macro)?.name === d?.runningMacro);
+  }
+
   $('#touchpad-toggle').setAttribute('aria-pressed', String(state.touchpad));
   $('#dpad').hidden = state.touchpad;
   $('#touchpad').hidden = !state.touchpad;
@@ -547,6 +567,163 @@ function render() {
   renderManage();
 }
 
+// ---------------------------------------------------------------- open link
+
+$('#link-form').addEventListener('submit', (e) => {
+  e.preventDefault();
+  const d = current();
+  if (!d?.state?.connected) return toast('TV is not connected');
+  const url = e.target.url.value.trim();
+  call('launch', { device: d.id, url })
+    .then(() => {
+      e.target.reset();
+      toast('Opening on TV…');
+    })
+    .catch(report);
+});
+
+// ---------------------------------------------------------------- sleep timer
+
+$('#sleep-btn').addEventListener('click', () => {
+  if (!current()?.paired) return toast('Pair a TV first');
+  $('#sleep-dialog').returnValue = ''; // a backdrop click must not repeat the last choice
+  $('#sleep-dialog').showModal();
+});
+$('#sleep-dialog').addEventListener('close', () => {
+  const v = $('#sleep-dialog').returnValue;
+  const d = current();
+  if (v === '' || !d) return;
+  call('sleep', { device: d.id, minutes: Number(v) })
+    .then(() => toast(Number(v) ? `TV will turn off in ${v} minutes` : 'Sleep timer off'))
+    .catch(report);
+});
+setInterval(render, 30000); // keep the countdown fresh
+
+// ---------------------------------------------------------------- volume
+
+$('#volume-label').addEventListener('click', () => {
+  const d = current();
+  const vol = d?.state?.volume;
+  if (!d?.state?.connected || !vol) return toast('Volume not available yet');
+  const range = $('#volume-range');
+  range.max = vol.max || 100;
+  range.value = vol.level;
+  $('#volume-value').textContent = vol.level;
+  $('#volume-dialog').showModal();
+});
+$('#volume-range').addEventListener('input', (e) => {
+  $('#volume-value').textContent = e.target.value;
+});
+$('#volume-range').addEventListener('change', (e) => {
+  const d = current();
+  if (d) call('volume', { device: d.id, level: Number(e.target.value) }).catch(report);
+});
+
+// ---------------------------------------------------------------- macros
+
+let editingMacro = null;
+
+function renderMacros() {
+  const grid = $('#macro-grid');
+  grid.replaceChildren(
+    ...state.macros.map((m) => {
+      const b = document.createElement('button');
+      b.textContent = m.name;
+      b.dataset.macro = m.id;
+      b.title = `${m.script}\n(right-click or long-press to edit)`;
+      b.addEventListener('click', () => {
+        const d = current();
+        if (!d?.state?.connected) return toast('TV is not connected');
+        if (d.runningMacro === m.name) {
+          call('macro.stop', { device: d.id }).catch(() => {});
+          return;
+        }
+        call('macro.run', { device: d.id, macro: m.id }).catch((err) => {
+          if (!/cancelled/.test(err.message)) report(err);
+        });
+      });
+      b.addEventListener('contextmenu', (e) => {
+        e.preventDefault();
+        openMacro(m);
+      });
+      return b;
+    }),
+  );
+  const add = document.createElement('button');
+  add.className = 'add';
+  add.textContent = '+ New macro';
+  add.addEventListener('click', () => openMacro(null));
+  grid.append(add);
+}
+
+function openMacro(m) {
+  editingMacro = m;
+  const f = $('#macro-form');
+  f.name.value = m?.name ?? '';
+  f.script.value = m?.script ?? '';
+  $('#macro-title').textContent = m ? 'Edit macro' : 'New macro';
+  $('#macro-delete').hidden = !m;
+  $('#macro-error').textContent = '';
+  $('#macro-dialog').showModal();
+}
+
+$('#macro-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const f = e.target;
+  try {
+    await call('macro.save', { macroId: editingMacro?.id, name: f.name.value, script: f.script.value });
+    $('#macro-dialog').close();
+  } catch (err) {
+    $('#macro-error').textContent = err.message;
+  }
+});
+$('#macro-test').addEventListener('click', () => {
+  const d = current();
+  if (!d?.state?.connected) return ($('#macro-error').textContent = 'TV is not connected');
+  $('#macro-error').textContent = '';
+  call('macro.run', { device: d.id, script: $('#macro-form').script.value }).catch((err) => {
+    $('#macro-error').textContent = err.message;
+  });
+});
+$('#macro-cancel').addEventListener('click', () => $('#macro-dialog').close());
+$('#macro-delete').addEventListener('click', () => {
+  if (editingMacro && confirm(`Delete “${editingMacro.name}”?`)) {
+    call('macro.delete', { macro: editingMacro.id }).catch(report);
+    $('#macro-dialog').close();
+  }
+});
+
+// ---------------------------------------------------------------- edit device
+
+let editingDevice = null;
+
+function openEdit(d) {
+  editingDevice = d;
+  const f = $('#edit-form');
+  f.name.value = d.name;
+  f.mac.value = d.mac ?? '';
+  $('#edit-error').textContent = '';
+  $('#edit-dialog').showModal();
+}
+
+$('#edit-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  try {
+    await call('update', { device: editingDevice.id, name: e.target.name.value, mac: e.target.mac.value.trim() });
+    $('#edit-dialog').close();
+  } catch (err) {
+    $('#edit-error').textContent = err.message;
+  }
+});
+$('#edit-cancel').addEventListener('click', () => $('#edit-dialog').close());
+
+for (const id of ['#sleep-dialog', '#volume-dialog', '#macro-dialog', '#edit-dialog']) {
+  $(id).addEventListener('click', (e) => {
+    if (e.target === e.currentTarget) e.currentTarget.close();
+  });
+}
+
 renderApps();
+renderMacros();
 render();
 connectSocket();
