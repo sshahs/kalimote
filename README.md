@@ -277,14 +277,15 @@ The Kotlin integration test drives the Node.js mock TV, so the two implementatio
 <details>
 <summary><b>📦 Releasing</b></summary>
 
-Push a tag (`git tag v1.2.3 && git push origin v1.2.3`), or run the **Release** workflow from the Actions tab. It runs the tests, builds the APK and publishes a GitHub Release with checksums.
+Push a tag (`git tag v1.2.3 && git push origin v1.2.3`), or run the **Release** workflow from the Actions tab. It runs the tests, builds the APK, checks its signature and publishes a GitHub Release with checksums.
 
-To sign with a stable key, so users can upgrade in place between versions, add these repository secrets: `KEYSTORE_BASE64` (base64 of a `.jks`), `KEYSTORE_PASSWORD`, `KEY_ALIAS` and `KEY_PASSWORD`. Without them, each release is signed with a throwaway key.
+Release APKs are signed with the project's stable key, so each version installs over the previous one. The key lives in four repository secrets: `KEYSTORE_BASE64`, `KEYSTORE_PASSWORD`, `KEY_ALIAS` and `KEY_PASSWORD`. The workflow refuses to release without them. It also checks every APK against the certificate fingerprint pinned in [`release.yml`](.github/workflows/release.yml):
 
-```bash
-keytool -genkeypair -v -keystore release.jks -alias kalimote -keyalg RSA -keysize 2048 -validity 10000
-base64 -w0 release.jks   # → KEYSTORE_BASE64
 ```
+FB:E9:69:48:AB:5B:42:99:D6:F7:79:33:71:DD:6E:D2:43:C9:DD:8B:53:BE:E9:84:CA:12:99:5F:5F:70:13:8A
+```
+
+Verify a download with `apksigner verify --print-certs kalimote-x.y.z.apk`. If the key is ever rotated, update `SIGNING_CERT_SHA256` in the workflow; users will then need to reinstall once.
 </details>
 
 ## ❓ Troubleshooting
@@ -329,7 +330,6 @@ Android batches alarms to save battery, so the timer can fire a minute or two la
 
 - [ ] Voice search (stream the mic to the TV's Assistant)
 - [ ] Home-screen widget and quick-settings tile on Android
-- [ ] Stable release signing
 - [ ] Pre-built Docker image
 
 Ideas and bug reports are welcome. [Open an issue](https://github.com/sshahs/kalimote/issues).

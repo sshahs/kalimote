@@ -15,6 +15,11 @@ on:
 permissions:
   contents: write
 
+env:
+  # SHA-256 of the release signing certificate. Every release APK is checked
+  # against it so users can always upgrade in place. Public; safe to commit.
+  SIGNING_CERT_SHA256: FB:E9:69:48:AB:5B:42:99:D6:F7:79:33:71:DD:6E:D2:43:C9:DD:8B:53:BE:E9:84:CA:12:99:5F:5F:70:13:8A
+
 jobs:
   release:
     runs-on: ubuntu-latest
@@ -40,18 +45,19 @@ jobs:
         working-directory: server
       - uses: gradle/actions/setup-gradle@v4
 
-      # Optional: a stable signing key lets users upgrade between releases.
-      # Set secrets KEYSTORE_BASE64, KEYSTORE_PASSWORD, KEY_ALIAS, KEY_PASSWORD.
+      # The stable release key, from secrets KEYSTORE_BASE64, KEYSTORE_PASSWORD,
+      # KEY_ALIAS and KEY_PASSWORD. Releases refuse to build without it, so a
+      # debug-signed APK (which can't upgrade an installed copy) never ships.
       - name: Decode signing key
         env:
           KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
         run: |
-          if [ -n "$KEYSTORE_BASE64" ]; then
-            echo "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/release.jks"
-            echo "KALIMOTE_KEYSTORE_FILE=$RUNNER_TEMP/release.jks" >> "$GITHUB_ENV"
-          else
-            echo "::warning::No KEYSTORE_BASE64 secret; the release APK is signed with a throwaway debug key."
+          if [ -z "$KEYSTORE_BASE64" ]; then
+            echo "::error::Missing KEYSTORE_BASE64 secret. See README → Releasing."
+            exit 1
           fi
+          echo "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/release.jks"
+          echo "KALIMOTE_KEYSTORE_FILE=$RUNNER_TEMP/release.jks" >> "$GITHUB_ENV"
 
       - name: Test and build release APK
         working-directory: android
@@ -63,6 +69,20 @@ jobs:
           ./gradlew --no-daemon :atvremote:test :app:assembleRelease
           -Pkalimote.versionName=${{ steps.version.outputs.version }}
           -Pkalimote.versionCode=${{ github.run_number }}
+
+      - name: Verify APK signature
+        id: cert
+        run: |
+          apk=android/app/build/outputs/apk/release/app-release.apk
+          apksigner=$(ls -d "$ANDROID_HOME"/build-tools/*/apksigner | sort -V | tail -1)
+          "$apksigner" verify --verbose --print-certs "$apk" | tee "$RUNNER_TEMP/certs.txt"
+          actual=$(grep -m1 'certificate SHA-256 digest' "$RUNNER_TEMP/certs.txt" | awk '{print $NF}')
+          expected=$(echo "$SIGNING_CERT_SHA256" | tr -d ':' | tr 'A-F' 'a-f')
+          if [ "$actual" != "$expected" ]; then
+            echo "::error::APK signed with $actual, expected $expected"
+            exit 1
+          fi
+          echo "sha256=$SIGNING_CERT_SHA256" >> "$GITHUB_OUTPUT"
 
       - name: Collect APK
         run: |
@@ -80,7 +100,10 @@ jobs:
             ## Install
             Download `kalimote-${{ steps.version.outputs.version }}.apk` on your Android phone (Android 8.0+) and open it; allow installing from your browser if asked.
 
-            The web remote runs from source: see the [README](https://github.com/${{ github.repository }}#web-remote).
+            The web remote runs from source: see the [README](https://github.com/${{ github.repository }}#-web-remote).
+
+            **Signing certificate SHA-256:** `${{ steps.cert.outputs.sha256 }}`
+            Check with `apksigner verify --print-certs kalimote-${{ steps.version.outputs.version }}.apk`.
           files: |
             dist/kalimote-${{ steps.version.outputs.version }}.apk
             dist/SHA256SUMS.txt
