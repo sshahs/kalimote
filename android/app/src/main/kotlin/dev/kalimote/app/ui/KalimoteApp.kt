@@ -28,6 +28,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -36,6 +37,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -48,6 +50,12 @@ fun KalimoteApp(vm: RemoteViewModel) {
     val state by vm.state.collectAsStateWithLifecycle()
     var showDevices by rememberSaveable { mutableStateOf(state.devices.isEmpty()) }
     val snackbar = remember { SnackbarHostState() }
+
+    val view = LocalView.current
+    DisposableEffect(state.keepScreenOn) {
+        view.keepScreenOn = state.keepScreenOn
+        onDispose { view.keepScreenOn = false }
+    }
 
     LaunchedEffect(state.message) {
         state.message?.let {
@@ -101,6 +109,10 @@ fun KalimoteApp(vm: RemoteViewModel) {
                     remove = { vm.remove(it.id) },
                     rescan = vm::rescan,
                     setVolumeKeys = vm::setVolumeKeys,
+                    setKeepScreenOn = vm::setKeepScreenOn,
+                    exportBackup = vm::exportBackup,
+                    importBackup = vm::importBackup,
+                    toast = vm::toast,
                 ),
                 modifier,
             )

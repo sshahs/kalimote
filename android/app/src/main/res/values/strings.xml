@@ -2,4 +2,14 @@
 <resources>
     <string name="app_name">Kalimote</string>
     <string name="share_label">Open on TV</string>
+    <string name="power">TV power</string>
+    <string name="play_pause">Play / Pause</string>
+    <string name="volume_up">Volume up</string>
+    <string name="volume_down">Volume down</string>
+    <string name="mute">Mute</string>
+    <string name="widget_no_tv">No TV paired</string>
+    <string name="widget_description">Power, volume and play/pause for your TV</string>
+    <string name="shortcut_power_long">Turn TV on or off</string>
+    <string name="shortcut_play_pause_long">Play or pause on TV</string>
+    <string name="shortcut_run_macro">Run %1$s</string>
 </resources>

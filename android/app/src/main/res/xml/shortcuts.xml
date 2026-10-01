@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
+    <shortcut
+        android:icon="@drawable/ic_shortcut_power"
+        android:shortcutId="power"
+        android:shortcutLongLabel="@string/shortcut_power_long"
+        android:shortcutShortLabel="@string/power">
+        <intent
+            android:action="android.intent.action.VIEW"
+            android:data="kalimote://quick/power"
+            android:targetClass="dev.kalimote.app.ShortcutActivity"
+            android:targetPackage="dev.kalimote.app" />
+    </shortcut>
+    <shortcut
+        android:icon="@drawable/ic_shortcut_play_pause"
+        android:shortcutId="play_pause"
+        android:shortcutLongLabel="@string/shortcut_play_pause_long"
+        android:shortcutShortLabel="@string/play_pause">
+        <intent
+            android:action="android.intent.action.VIEW"
+            android:data="kalimote://quick/key/85"
+            android:targetClass="dev.kalimote.app.ShortcutActivity"
+            android:targetPackage="dev.kalimote.app" />
+    </shortcut>
+</shortcuts>

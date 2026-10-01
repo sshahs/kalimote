@@ -1,5 +1,10 @@
 package dev.kalimote.app.ui
 
+import android.content.ActivityNotFoundException
+import android.content.Intent
+import android.speech.RecognizerIntent
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
@@ -428,6 +433,7 @@ private fun Apps(state: UiState, actions: RemoteActions, onAdd: () -> Unit) {
 @Composable
 private fun KeyboardDialog(onDismiss: () -> Unit, onText: (String) -> Unit, onKey: (Int) -> Unit) {
     var text by rememberSaveable { mutableStateOf("") }
+    var voiceError by remember { mutableStateOf<String?>(null) }
     val focus = remember { FocusRequester() }
     LaunchedEffect(Unit) { focus.requestFocus() }
     val send = {
@@ -435,6 +441,26 @@ private fun KeyboardDialog(onDismiss: () -> Unit, onText: (String) -> Unit, onKe
             onText(text)
             text = ""
         }
+    }
+    // Voice typing: the system speech recogniser fills in and sends the text.
+    val voice = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+        val spoken = result.data?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)?.firstOrNull()
+        if (!spoken.isNullOrBlank()) {
+            text = spoken
+            send()
+        }
+    }
+    val listen = {
+        val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH)
+            .putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+            .putExtra(RecognizerIntent.EXTRA_PROMPT, "Say what to type on the TV")
+        try {
+            voice.launch(intent)
+            voiceError = null
+        } catch (_: ActivityNotFoundException) {
+            voiceError = "No speech recognition available on this phone"
+        }
+        Unit
     }
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -454,7 +480,9 @@ private fun KeyboardDialog(onDismiss: () -> Unit, onText: (String) -> Unit, onKe
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     RemoteButton("Delete", Modifier.size(56.dp, 40.dp), icon = Icons.AutoMirrored.Filled.Backspace, shape = RoundedCornerShape(12.dp), repeat = true) { onKey(KeyCodes.DEL) }
                     RemoteButton("Enter", Modifier.size(56.dp, 40.dp), icon = Icons.AutoMirrored.Filled.KeyboardReturn, shape = RoundedCornerShape(12.dp)) { onKey(KeyCodes.ENTER) }
+                    RemoteButton("Voice typing", Modifier.size(56.dp, 40.dp), icon = Icons.Filled.Mic, shape = RoundedCornerShape(12.dp), container = Accent, content = Color.White) { listen() }
                 }
+                voiceError?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
             }
         },
         confirmButton = { Button(onClick = send) { Text("Send") } },

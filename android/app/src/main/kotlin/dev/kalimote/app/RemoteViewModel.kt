@@ -42,6 +42,7 @@ data class UiState(
     val apps: List<AppShortcut> = DEFAULT_APPS,
     val touchpad: Boolean = false,
     val volumeKeys: Boolean = true,
+    val keepScreenOn: Boolean = false,
     val macros: List<SavedMacro> = emptyList(),
     val runningMacro: String? = null,
     val sleepAt: Long = 0,
@@ -63,6 +64,7 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
             apps = store.loadApps(),
             touchpad = store.touchpad,
             volumeKeys = store.volumeKeys,
+            keepScreenOn = store.keepScreenOn,
             macros = store.loadMacros(),
             sleepAt = store.sleepAt.takeIf { it > System.currentTimeMillis() } ?: 0,
         ),
@@ -87,6 +89,7 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
         if (_state.value.selected == null) {
             _state.update { it.copy(selectedId = it.devices.firstOrNull()?.id) }
         }
+        MacroShortcuts.update(app, _state.value.macros)
     }
 
     private suspend fun identity(): ClientIdentity =
@@ -165,6 +168,7 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
     private fun updateDevices(change: (List<TvDevice>) -> List<TvDevice>) {
         _state.update { it.copy(devices = change(it.devices)) }
         store.saveDevices(_state.value.devices)
+        RemoteWidget.refresh(getApplication())
     }
 
     private fun updateDevice(id: String, change: (TvDevice) -> TvDevice) =
@@ -173,6 +177,7 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
     fun select(id: String) {
         store.selectedId = id
         _state.update { it.copy(selectedId = id) }
+        RemoteWidget.refresh(getApplication())
         ensureClient()
     }
 
@@ -380,13 +385,13 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
         _state.update { s ->
             s.copy(macros = if (existing == null) s.macros + macro else s.macros.map { if (it.id == existing.id) macro else it })
         }
-        store.saveMacros(_state.value.macros)
+        saveMacros()
         return null
     }
 
     fun deleteMacro(macro: SavedMacro) {
         _state.update { s -> s.copy(macros = s.macros.filterNot { it.id == macro.id }) }
-        store.saveMacros(_state.value.macros)
+        saveMacros()
     }
 
     /** Returns an error message (bad script / not connected), or null if started. */
@@ -430,6 +435,37 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
     fun setTouchpad(on: Boolean) {
         store.touchpad = on
         _state.update { it.copy(touchpad = on) }
+    }
+
+    private fun saveMacros() {
+        store.saveMacros(_state.value.macros)
+        MacroShortcuts.update(getApplication(), _state.value.macros)
+    }
+
+    fun setKeepScreenOn(on: Boolean) {
+        store.keepScreenOn = on
+        _state.update { it.copy(keepScreenOn = on) }
+    }
+
+    fun exportBackup(): String = Backup.export(_state.value.macros, _state.value.apps)
+
+    /** Merges a backup; items with the same name are replaced. Returns a summary or error. */
+    fun importBackup(text: String): String {
+        val contents = try {
+            Backup.parse(text)
+        } catch (e: IllegalArgumentException) {
+            return e.message ?: "Invalid backup"
+        }
+        val bad = contents.macros.firstOrNull { m -> runCatching { Macro.parse(m.script) }.isFailure }
+        if (bad != null) return "Macro “${bad.name}” has an error; nothing imported"
+        _state.update { s ->
+            val macros = s.macros.filterNot { m -> contents.macros.any { it.name.equals(m.name, true) } } + contents.macros
+            val apps = s.apps.filterNot { a -> contents.apps.any { it.name.equals(a.name, true) } } + contents.apps
+            s.copy(macros = macros, apps = apps)
+        }
+        saveMacros()
+        store.saveApps(_state.value.apps)
+        return "Imported ${contents.macros.size} macros and ${contents.apps.size} app shortcuts"
     }
 
     fun setVolumeKeys(on: Boolean) {

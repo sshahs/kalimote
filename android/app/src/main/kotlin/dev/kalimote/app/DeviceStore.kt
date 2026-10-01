@@ -104,7 +104,53 @@ class DeviceStore(context: Context) {
         get() = prefs.getBoolean("touchpad", false)
         set(value) = prefs.edit().putBoolean("touchpad", value).apply()
 
+    var keepScreenOn: Boolean
+        get() = prefs.getBoolean("keepScreenOn", false)
+        set(value) = prefs.edit().putBoolean("keepScreenOn", value).apply()
+
     var volumeKeys: Boolean
         get() = prefs.getBoolean("volumeKeys", true)
         set(value) = prefs.edit().putBoolean("volumeKeys", value).apply()
+}
+
+/**
+ * Backup format for macros and app shortcuts, shared with the web server:
+ * `{"macros":[{"name","script"}], "apps":[{"name","url"}]}`. A bare array of
+ * macros (as returned by the server's GET /api/devices "macros") also imports.
+ */
+object Backup {
+    data class Contents(val macros: List<SavedMacro>, val apps: List<AppShortcut>)
+
+    fun export(macros: List<SavedMacro>, apps: List<AppShortcut>): String {
+        val m = JSONArray()
+        macros.forEach { m.put(JSONObject().put("name", it.name).put("script", it.script)) }
+        val a = JSONArray()
+        apps.forEach { a.put(JSONObject().put("name", it.name).put("url", it.url)) }
+        return JSONObject().put("kalimote", 1).put("macros", m).put("apps", a).toString(2)
+    }
+
+    /** Throws IllegalArgumentException with a readable message on bad input. */
+    fun parse(text: String): Contents {
+        val trimmed = text.trim()
+        try {
+            val (macros, apps) = if (trimmed.startsWith("[")) {
+                JSONArray(trimmed) to JSONArray()
+            } else {
+                val o = JSONObject(trimmed)
+                (o.optJSONArray("macros") ?: JSONArray()) to (o.optJSONArray("apps") ?: JSONArray())
+            }
+            return Contents(
+                (0 until macros.length()).map { i ->
+                    val o = macros.getJSONObject(i)
+                    SavedMacro(name = o.getString("name"), script = o.getString("script"))
+                },
+                (0 until apps.length()).map { i ->
+                    val o = apps.getJSONObject(i)
+                    AppShortcut(o.getString("name"), o.getString("url"))
+                },
+            )
+        } catch (e: org.json.JSONException) {
+            throw IllegalArgumentException("That isn't a Kalimote backup (${e.message})")
+        }
+    }
 }

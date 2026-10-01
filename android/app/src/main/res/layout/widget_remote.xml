@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@android:id/background"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@drawable/widget_background"
+    android:gravity="center"
+    android:orientation="vertical"
+    android:padding="10dp">
+
+    <TextView
+        android:id="@+id/widget_title"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:drawablePadding="6dp"
+        android:ellipsize="end"
+        android:maxLines="1"
+        android:paddingBottom="6dp"
+        android:text="@string/app_name"
+        android:textColor="#FFEEF0F4"
+        android:textSize="13sp"
+        android:textStyle="bold" />
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:gravity="center"
+        android:orientation="horizontal">
+
+        <ImageButton
+            android:id="@+id/widget_power"
+            style="@style/WidgetButton"
+            android:contentDescription="@string/power"
+            android:src="@drawable/ic_qs_power"
+            android:tint="#FFFF5A5F" />
+
+        <ImageButton
+            android:id="@+id/widget_vol_down"
+            style="@style/WidgetButton"
+            android:contentDescription="@string/volume_down"
+            android:src="@drawable/ic_vol_down" />
+
+        <ImageButton
+            android:id="@+id/widget_play_pause"
+            style="@style/WidgetButton"
+            android:background="@drawable/widget_button_accent"
+            android:contentDescription="@string/play_pause"
+            android:src="@drawable/ic_qs_play_pause" />
+
+        <ImageButton
+            android:id="@+id/widget_vol_up"
+            style="@style/WidgetButton"
+            android:contentDescription="@string/volume_up"
+            android:src="@drawable/ic_vol_up" />
+
+        <ImageButton
+            android:id="@+id/widget_mute"
+            style="@style/WidgetButton"
+            android:contentDescription="@string/mute"
+            android:src="@drawable/ic_mute" />
+    </LinearLayout>
+</LinearLayout>

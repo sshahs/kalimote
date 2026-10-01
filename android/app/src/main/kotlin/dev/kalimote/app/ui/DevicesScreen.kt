@@ -71,6 +71,10 @@ class DeviceActions(
     val remove: (TvDevice) -> Unit,
     val rescan: () -> Unit,
     val setVolumeKeys: (Boolean) -> Unit,
+    val setKeepScreenOn: (Boolean) -> Unit,
+    val exportBackup: () -> String,
+    val importBackup: (String) -> String,
+    val toast: (String) -> Unit,
 )
 
 @Composable
@@ -159,6 +163,19 @@ fun DevicesScreen(state: UiState, actions: DeviceActions, modifier: Modifier = M
             }
             Switch(checked = state.volumeKeys, onCheckedChange = actions.setVolumeKeys)
         }
+        Card(onClick = { actions.setKeepScreenOn(!state.keepScreenOn) }) {
+            Column(Modifier.weight(1f)) {
+                Text("Keep screen on", fontWeight = FontWeight.SemiBold)
+                Text("While the remote is open", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 13.sp)
+            }
+            Switch(checked = state.keepScreenOn, onCheckedChange = actions.setKeepScreenOn)
+        }
+
+        SectionTitle("Quick controls")
+        QuickControlsCard(actions.toast)
+
+        SectionTitle("Backup")
+        BackupCard(actions.exportBackup, actions.importBackup, actions.toast)
     }
 }
 
