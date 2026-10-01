@@ -148,6 +148,7 @@ object KeyCodes {
     const val PROG_YELLOW = 185
     const val PROG_BLUE = 186
     const val ASSIST = 219
+    const val MEDIA_AUDIO_TRACK = 222
 
     fun digit(n: Int): Int {
         require(n in 0..9)

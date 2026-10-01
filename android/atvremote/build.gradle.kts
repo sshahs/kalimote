@@ -14,6 +14,9 @@ kotlin {
 }
 
 dependencies {
+    // Android ships org.json; only the plain-JVM build and tests need the jar.
+    compileOnly("org.json:json:20240303")
+    testImplementation("org.json:json:20240303")
     testImplementation(kotlin("test"))
     testImplementation("org.junit.jupiter:junit-jupiter:5.11.3")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")

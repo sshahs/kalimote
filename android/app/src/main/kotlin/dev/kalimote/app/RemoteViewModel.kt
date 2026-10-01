@@ -7,6 +7,11 @@ import androidx.lifecycle.viewModelScope
 import dev.kalimote.atvremote.ClientIdentity
 import dev.kalimote.atvremote.DeviceInfo
 import dev.kalimote.atvremote.Direction
+import dev.kalimote.atvremote.Jellyfin
+import dev.kalimote.atvremote.JellyfinAction
+import dev.kalimote.atvremote.JellyfinApp
+import dev.kalimote.atvremote.JellyfinClient
+import dev.kalimote.atvremote.JellyfinSession
 import dev.kalimote.atvremote.KeyCodes
 import dev.kalimote.atvremote.Macro
 import dev.kalimote.atvremote.MacroException
@@ -43,12 +48,20 @@ data class UiState(
     val touchpad: Boolean = false,
     val volumeKeys: Boolean = true,
     val keepScreenOn: Boolean = false,
+    val jellyfinUrl: String = "",
+    val jellyfinConfigured: Boolean = false,
+    val jellyfinSession: JellyfinSession? = null,
+    val jellyfinFetchedAt: Long = 0,
+    val jellyfinError: String? = null,
     val macros: List<SavedMacro> = emptyList(),
     val runningMacro: String? = null,
     val sleepAt: Long = 0,
     val message: String? = null,
 ) {
     val selected: TvDevice? get() = devices.firstOrNull { it.id == selectedId }
+
+    /** Jellyfin in the TV's foreground (release or debug build), if any. */
+    val jellyfinApp: JellyfinApp? get() = if (remote.connected) Jellyfin.detect(remote.currentApp) else null
 
     /** Discovered TVs that have not been added yet. */
     val newDiscovered: List<DiscoveredTv>
@@ -65,6 +78,8 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
             touchpad = store.touchpad,
             volumeKeys = store.volumeKeys,
             keepScreenOn = store.keepScreenOn,
+            jellyfinUrl = store.jellyfinUrl,
+            jellyfinConfigured = store.jellyfinUrl.isNotBlank() && store.jellyfinKey.isNotBlank(),
             macros = store.loadMacros(),
             sleepAt = store.sleepAt.takeIf { it > System.currentTimeMillis() } ?: 0,
         ),
@@ -82,7 +97,7 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
     private val deviceInfo = DeviceInfo(
         model = Build.MODEL ?: "Android",
         vendor = Build.MANUFACTURER ?: "Kalimote",
-        appVersion = "0.1.0",
+        appVersion = runCatching { app.packageManager.getPackageInfo(app.packageName, 0).versionName }.getOrNull() ?: "0",
     )
 
     init {
@@ -90,6 +105,14 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
             _state.update { it.copy(selectedId = it.devices.firstOrNull()?.id) }
         }
         MacroShortcuts.update(app, _state.value.macros)
+        // Poll the Jellyfin server while Jellyfin is on screen and the app is open.
+        viewModelScope.launch {
+            while (true) {
+                val s = _state.value
+                if (foreground && s.jellyfinApp != null && s.jellyfinConfigured) refreshJellyfin()
+                delay(2000)
+            }
+        }
     }
 
     private suspend fun identity(): ClientIdentity =
@@ -466,6 +489,71 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
         saveMacros()
         store.saveApps(_state.value.apps)
         return "Imported ${contents.macros.size} macros and ${contents.apps.size} app shortcuts"
+    }
+
+    // ------------------------------------------------------------ Jellyfin
+
+    private fun jellyfinClient(): JellyfinClient? = runCatching {
+        JellyfinClient(store.jellyfinUrl, store.jellyfinKey, deviceInfo.appVersion)
+    }.getOrNull()
+
+    private suspend fun refreshJellyfin() {
+        val host = _state.value.selected?.host ?: return
+        val client = jellyfinClient() ?: return
+        val result = withContext(Dispatchers.IO) { runCatching { client.sessionFor(host) } }
+        _state.update {
+            it.copy(
+                jellyfinSession = result.getOrNull(),
+                jellyfinFetchedAt = System.currentTimeMillis(),
+                jellyfinError = result.exceptionOrNull()?.message,
+            )
+        }
+    }
+
+    fun jellyfinControl(action: JellyfinAction) {
+        val client = jellyfinClient() ?: return
+        val host = _state.value.selected?.host ?: return
+        viewModelScope.launch {
+            val error = withContext(Dispatchers.IO) {
+                runCatching {
+                    val session = client.sessionFor(host) ?: error("No Jellyfin session found for this TV")
+                    client.control(session, action)
+                }.exceptionOrNull()?.message
+            }
+            if (error != null) toast(error)
+            delay(300)
+            refreshJellyfin()
+        }
+    }
+
+    /** Tests and saves the server; [done] gets an error message or null. Blank key keeps the saved one. */
+    fun saveJellyfin(url: String, apiKey: String, done: (String?) -> Unit) {
+        val key = apiKey.trim().ifBlank { store.jellyfinKey }
+        viewModelScope.launch {
+            val result = withContext(Dispatchers.IO) {
+                runCatching { JellyfinClient(url, key, deviceInfo.appVersion).info() }
+            }
+            result.onSuccess { (name, version) ->
+                store.jellyfinUrl = url.trim().trimEnd('/')
+                store.jellyfinKey = key
+                _state.update { it.copy(jellyfinUrl = store.jellyfinUrl, jellyfinConfigured = true, jellyfinError = null) }
+                toast("Connected to $name (Jellyfin $version)")
+                refreshJellyfin()
+            }
+            done(result.exceptionOrNull()?.message)
+        }
+    }
+
+    fun removeJellyfin() {
+        store.jellyfinUrl = ""
+        store.jellyfinKey = ""
+        _state.update { it.copy(jellyfinUrl = "", jellyfinConfigured = false, jellyfinSession = null) }
+    }
+
+    /** Poster bytes for the now-playing card (null if unavailable). */
+    suspend fun jellyfinPoster(itemId: String, tag: String?): ByteArray? {
+        val client = jellyfinClient() ?: return null
+        return withContext(Dispatchers.IO) { runCatching { client.image(itemId, tag) }.getOrNull() }
     }
 
     fun setVolumeKeys(on: Boolean) {

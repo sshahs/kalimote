@@ -109,6 +109,7 @@ class RemoteActions(
     val runMacro: (String, String) -> String?,
     val stopMacro: () -> Unit,
     val toast: (String) -> Unit,
+    val jellyfin: JellyfinActions,
 )
 
 @Composable
@@ -219,6 +220,8 @@ fun RemoteScreen(state: UiState, actions: RemoteActions, modifier: Modifier = Mo
                 RemoteButton("Next", m, icon = Icons.Filled.SkipNext, shape = shape) { key(KeyCodes.MEDIA_NEXT) }
                 RemoteButton("Fast forward", m, icon = Icons.Filled.FastForward, shape = shape) { key(KeyCodes.MEDIA_FAST_FORWARD) }
             }
+
+            JellyfinPanel(state, actions.jellyfin)
 
             MoreButtons(expanded = showMore, onToggle = { showMore = !showMore }, key = key)
 
@@ -524,5 +527,5 @@ fun prettyApp(pkg: String): String = when (pkg) {
     "com.disney.disneyplus" -> "Disney+"
     "com.spotify.tv.android" -> "Spotify"
     "com.plexapp.android" -> "Plex"
-    else -> pkg
+    else -> dev.kalimote.atvremote.Jellyfin.detect(pkg)?.let { if (it.debug) "Jellyfin (debug)" else "Jellyfin" } ?: pkg
 }

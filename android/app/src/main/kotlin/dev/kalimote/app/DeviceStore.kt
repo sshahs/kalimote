@@ -25,6 +25,7 @@ val DEFAULT_APPS = listOf(
     AppShortcut("Disney+", "market://launch?id=com.disney.disneyplus"),
     AppShortcut("Spotify", "market://launch?id=com.spotify.tv.android"),
     AppShortcut("Plex", "market://launch?id=com.plexapp.android"),
+    AppShortcut("Jellyfin", "market://launch?id=org.jellyfin.androidtv"),
 )
 
 /** Persists TVs, app shortcuts and preferences in SharedPreferences. */
@@ -103,6 +104,15 @@ class DeviceStore(context: Context) {
     var touchpad: Boolean
         get() = prefs.getBoolean("touchpad", false)
         set(value) = prefs.edit().putBoolean("touchpad", value).apply()
+
+    /** Optional Jellyfin server for now playing / seeking / tracks. */
+    var jellyfinUrl: String
+        get() = prefs.getString("jellyfinUrl", "") ?: ""
+        set(value) = prefs.edit().putString("jellyfinUrl", value).apply()
+
+    var jellyfinKey: String
+        get() = prefs.getString("jellyfinKey", "") ?: ""
+        set(value) = prefs.edit().putString("jellyfinKey", value).apply()
 
     var keepScreenOn: Boolean
         get() = prefs.getBoolean("keepScreenOn", false)

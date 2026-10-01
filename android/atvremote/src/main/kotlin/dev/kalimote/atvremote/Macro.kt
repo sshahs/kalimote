@@ -48,7 +48,7 @@ object Macro {
         put("SETTINGS", KeyCodes.SETTINGS); put("TV_INPUT", KeyCodes.TV_INPUT)
         put("PROG_RED", KeyCodes.PROG_RED); put("PROG_GREEN", KeyCodes.PROG_GREEN)
         put("PROG_YELLOW", KeyCodes.PROG_YELLOW); put("PROG_BLUE", KeyCodes.PROG_BLUE)
-        put("ASSIST", KeyCodes.ASSIST); put("SLEEP", 223); put("WAKEUP", 224)
+        put("ASSIST", KeyCodes.ASSIST); put("MEDIA_AUDIO_TRACK", KeyCodes.MEDIA_AUDIO_TRACK); put("SLEEP", 223); put("WAKEUP", 224)
     }
 
     fun resolveKey(name: String): Int {

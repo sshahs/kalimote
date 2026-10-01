@@ -75,6 +75,7 @@ class DeviceActions(
     val exportBackup: () -> String,
     val importBackup: (String) -> String,
     val toast: (String) -> Unit,
+    val openJellyfin: () -> Unit,
 )
 
 @Composable
@@ -173,6 +174,18 @@ fun DevicesScreen(state: UiState, actions: DeviceActions, modifier: Modifier = M
 
         SectionTitle("Quick controls")
         QuickControlsCard(actions.toast)
+
+        SectionTitle("Jellyfin")
+        Card(onClick = actions.openJellyfin) {
+            Column(Modifier.weight(1f)) {
+                Text(if (state.jellyfinConfigured) "Jellyfin server connected" else "Connect a Jellyfin server", fontWeight = FontWeight.SemiBold)
+                Text(
+                    if (state.jellyfinConfigured) state.jellyfinUrl else "Optional: now playing, seeking and track selection while Jellyfin is open on the TV",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    fontSize = 13.sp,
+                )
+            }
+        }
 
         SectionTitle("Backup")
         BackupCard(actions.exportBackup, actions.importBackup, actions.toast)

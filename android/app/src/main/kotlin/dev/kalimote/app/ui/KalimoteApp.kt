@@ -50,6 +50,7 @@ fun KalimoteApp(vm: RemoteViewModel) {
     val state by vm.state.collectAsStateWithLifecycle()
     var showDevices by rememberSaveable { mutableStateOf(state.devices.isEmpty()) }
     val snackbar = remember { SnackbarHostState() }
+    var showJellyfinSettings by rememberSaveable { mutableStateOf(false) }
 
     val view = LocalView.current
     DisposableEffect(state.keepScreenOn) {
@@ -113,6 +114,7 @@ fun KalimoteApp(vm: RemoteViewModel) {
                     exportBackup = vm::exportBackup,
                     importBackup = vm::importBackup,
                     toast = vm::toast,
+                    openJellyfin = { showJellyfinSettings = true },
                 ),
                 modifier,
             )
@@ -138,10 +140,26 @@ fun KalimoteApp(vm: RemoteViewModel) {
                     runMacro = vm::runMacro,
                     stopMacro = vm::stopMacro,
                     toast = vm::toast,
+                    jellyfin = JellyfinActions(
+                        key = { vm.sendKey(it) },
+                        control = vm::jellyfinControl,
+                        openSettings = { showJellyfinSettings = true },
+                        poster = vm::jellyfinPoster,
+                    ),
                 ),
                 modifier,
             )
         }
+    }
+
+    if (showJellyfinSettings) {
+        JellyfinSettingsDialog(
+            url = state.jellyfinUrl,
+            configured = state.jellyfinConfigured,
+            onSave = vm::saveJellyfin,
+            onRemove = vm::removeJellyfin,
+            onDismiss = { showJellyfinSettings = false },
+        )
     }
 
     state.pairing?.let { pairing ->
