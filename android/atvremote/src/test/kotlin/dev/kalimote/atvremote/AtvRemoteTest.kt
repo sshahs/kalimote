@@ -119,6 +119,9 @@ class AtvRemoteTest {
             expect(Regex("text \"hello\""))
             client.launchApp("https://www.youtube.com")
             client.await { it.currentApp == "https://www.youtube.com" }
+            Macro.run(client, Macro.parse("DPAD_LEFT x2, VOLUME_DOWN"))
+            expect(Regex("key 21 dir 3"))
+            client.await { it.volume?.level == 10 }
             client.sendKey(KeyCodes.POWER)
             client.await { it.powered == false }
             client.shutdown()

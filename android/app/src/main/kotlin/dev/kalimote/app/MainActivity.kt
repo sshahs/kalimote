@@ -1,5 +1,6 @@
 package dev.kalimote.app
 
+import android.content.Intent
 import android.os.Bundle
 import android.view.KeyEvent
 import androidx.activity.ComponentActivity
@@ -21,6 +22,20 @@ class MainActivity : ComponentActivity() {
                 KalimoteApp(vm)
             }
         }
+        if (savedInstanceState == null) handleShare(intent)
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        handleShare(intent)
+    }
+
+    /** "Share → Kalimote" from YouTube, Netflix, a browser… opens the link on the TV. */
+    private fun handleShare(intent: Intent?) {
+        if (intent?.action != Intent.ACTION_SEND) return
+        val text = intent.getStringExtra(Intent.EXTRA_TEXT) ?: return
+        vm.openLink(text)
+        setIntent(Intent(this, MainActivity::class.java)) // don't re-handle on rotation
     }
 
     override fun onStart() {

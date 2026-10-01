@@ -66,7 +66,8 @@ class DeviceActions(
     val select: (TvDevice) -> Unit,
     val pair: (TvDevice) -> Unit,
     val add: (host: String, name: String?) -> Unit,
-    val rename: (TvDevice, String) -> Unit,
+    /** Returns an error message, or null when saved. */
+    val edit: (TvDevice, name: String, mac: String) -> String?,
     val remove: (TvDevice) -> Unit,
     val rescan: () -> Unit,
     val setVolumeKeys: (Boolean) -> Unit,
@@ -191,7 +192,7 @@ private fun DeviceRow(d: TvDevice, state: UiState, actions: DeviceActions) {
             IconButton(onClick = { menu = true }) { Icon(Icons.Filled.MoreVert, "More") }
             DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
                 DropdownMenuItem(
-                    text = { Text("Rename") },
+                    text = { Text("Edit") },
                     leadingIcon = { Icon(Icons.Filled.Edit, null) },
                     onClick = { menu = false; renaming = true },
                 )
@@ -210,11 +211,36 @@ private fun DeviceRow(d: TvDevice, state: UiState, actions: DeviceActions) {
     }
     if (renaming) {
         var value by remember { mutableStateOf(d.name) }
+        var mac by remember { mutableStateOf(d.mac ?: "") }
+        var error by remember { mutableStateOf<String?>(null) }
         AlertDialog(
             onDismissRequest = { renaming = false },
-            title = { Text("Rename TV") },
-            text = { OutlinedTextField(value, { value = it }, singleLine = true) },
-            confirmButton = { TextButton(onClick = { actions.rename(d, value); renaming = false }) { Text("Save") } },
+            title = { Text("Edit TV") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedTextField(value, { value = it }, label = { Text("Name") }, singleLine = true)
+                    OutlinedTextField(
+                        mac,
+                        { mac = it },
+                        label = { Text("MAC address (Wake-on-LAN)") },
+                        placeholder = { Text("aa:bb:cc:dd:ee:ff") },
+                        singleLine = true,
+                    )
+                    Text(
+                        "Lets the power button turn on a TV that drops off the network when off. " +
+                            "Find it on the TV under Settings → Network → About (Wi-Fi or Ethernet MAC).",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    error = actions.edit(d, value, mac)
+                    if (error == null) renaming = false
+                }) { Text("Save") }
+            },
             dismissButton = { TextButton(onClick = { renaming = false }) { Text("Cancel") } },
         )
     }

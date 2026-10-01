@@ -7,19 +7,23 @@ import androidx.lifecycle.viewModelScope
 import dev.kalimote.atvremote.ClientIdentity
 import dev.kalimote.atvremote.DeviceInfo
 import dev.kalimote.atvremote.Direction
+import dev.kalimote.atvremote.KeyCodes
+import dev.kalimote.atvremote.Macro
+import dev.kalimote.atvremote.MacroException
 import dev.kalimote.atvremote.PairingSession
 import dev.kalimote.atvremote.RemoteClient
 import dev.kalimote.atvremote.RemoteState
+import dev.kalimote.atvremote.WakeOnLan
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
-import java.io.File
 
 data class PairingUi(
     val device: TvDevice,
@@ -38,6 +42,9 @@ data class UiState(
     val apps: List<AppShortcut> = DEFAULT_APPS,
     val touchpad: Boolean = false,
     val volumeKeys: Boolean = true,
+    val macros: List<SavedMacro> = emptyList(),
+    val runningMacro: String? = null,
+    val sleepAt: Long = 0,
     val message: String? = null,
 ) {
     val selected: TvDevice? get() = devices.firstOrNull { it.id == selectedId }
@@ -56,17 +63,19 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
             apps = store.loadApps(),
             touchpad = store.touchpad,
             volumeKeys = store.volumeKeys,
+            macros = store.loadMacros(),
+            sleepAt = store.sleepAt.takeIf { it > System.currentTimeMillis() } ?: 0,
         ),
     )
     val state: StateFlow<UiState> = _state.asStateFlow()
 
-    private val identityMutex = Mutex()
-    private var identity: ClientIdentity? = null
     private var client: RemoteClient? = null
     @Volatile
     private var clientDeviceId: String? = null
     private var pairingSession: PairingSession? = null
     private var foreground = false
+    private var macroJob: Job? = null
+    private var pendingLink: String? = null
     private val discovery = Discovery(app) { found -> _state.update { it.copy(discovered = found) } }
     private val deviceInfo = DeviceInfo(
         model = Build.MODEL ?: "Android",
@@ -80,18 +89,15 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    private suspend fun identity(): ClientIdentity = identityMutex.withLock {
-        identity ?: withContext(Dispatchers.IO) {
-            val file = File(getApplication<Application>().filesDir, "identity")
-            val loaded = runCatching { ClientIdentity.decode(file.readText()) }.getOrNull()
-            loaded ?: ClientIdentity.generate("kalimote-android").also { file.writeText(it.encode()) }
-        }.also { identity = it }
-    }
+    private suspend fun identity(): ClientIdentity =
+        withContext(Dispatchers.IO) { Identity.get(getApplication()) }
 
     // ------------------------------------------------------------ lifecycle
 
     fun onForeground() {
         foreground = true
+        // The sleep timer may have fired while we were away.
+        _state.update { it.copy(sleepAt = store.sleepAt.takeIf { at -> at > System.currentTimeMillis() } ?: 0) }
         discovery.start()
         ensureClient()
         client?.reconnectNow()
@@ -142,6 +148,13 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
     private fun onRemoteState(deviceId: String, remote: RemoteState) {
         if (clientDeviceId != deviceId) return
         _state.update { it.copy(remote = remote) }
+        if (remote.connected) {
+            pendingLink?.let { url ->
+                pendingLink = null
+                client?.launchApp(url)
+                toast("Opening on TV…")
+            }
+        }
         if (remote.status == RemoteState.Status.UNPAIRED) {
             viewModelScope.launch { updateDevice(deviceId) { it.copy(paired = false) } }
         }
@@ -180,6 +193,14 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
     fun rename(id: String, name: String) {
         if (name.isBlank()) return
         updateDevice(id) { it.copy(name = name.trim()) }
+    }
+
+    /** Returns an error message, or null on success. */
+    fun editDevice(id: String, name: String, mac: String): String? {
+        val normalized = if (mac.isBlank()) null else WakeOnLan.normalize(mac) ?: return "MAC address must look like aa:bb:cc:dd:ee:ff"
+        if (name.isBlank()) return "Name is required"
+        updateDevice(id) { it.copy(name = name.trim(), mac = normalized) }
+        return null
     }
 
     fun remove(id: String) {
@@ -253,6 +274,11 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
         val c = client
         if (c == null || !c.state.connected) {
             val d = _state.value.selected
+            // The power button can wake a TV that dropped off the network.
+            if (code == KeyCodes.POWER && d?.paired == true && d.mac != null) {
+                wake()
+                return
+            }
             toast(
                 when {
                     d == null -> "Add a TV first"
@@ -273,6 +299,122 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
 
     fun launchApp(app: AppShortcut) {
         if (isConnected) client?.launchApp(app.url) else toast("TV is not connected")
+    }
+
+    /** Opens a link on the TV; queued until connected (e.g. when shared from another app). */
+    fun openLink(raw: String) {
+        val url = Regex("[a-zA-Z][\\w+.-]*://\\S+").find(raw)?.value ?: run {
+            toast("That doesn't look like a link")
+            return
+        }
+        when {
+            isConnected -> {
+                client?.launchApp(url)
+                toast("Opening on TV…")
+            }
+            _state.value.selected?.paired == true -> {
+                pendingLink = url
+                toast("Will open when the TV connects")
+                client?.reconnectNow()
+            }
+            else -> toast("Pair a TV first")
+        }
+    }
+
+    // ------------------------------------------------------------ power, sleep, volume
+
+    fun wake() {
+        val d = _state.value.selected ?: return
+        val mac = d.mac ?: run {
+            toast("Set the TV's MAC address first (TVs → ⋮ → Edit)")
+            return
+        }
+        viewModelScope.launch {
+            val ok = withContext(Dispatchers.IO) { runCatching { WakeOnLan.wake(mac) }.isSuccess }
+            toast(if (ok) "Wake-on-LAN sent" else "Could not send Wake-on-LAN")
+            delay(3000)
+            client?.reconnectNow()
+        }
+    }
+
+    fun setSleepTimer(minutes: Int) {
+        val d = _state.value.selected ?: return
+        val app = getApplication<Application>()
+        if (minutes <= 0) {
+            SleepTimer.cancel(app)
+            _state.update { it.copy(sleepAt = 0) }
+            toast("Sleep timer off")
+        } else {
+            val at = SleepTimer.schedule(app, d.id, minutes)
+            _state.update { it.copy(sleepAt = at) }
+            toast("${d.name} will turn off in $minutes minutes")
+        }
+    }
+
+    /** Steps the volume to an absolute level with volume key presses. */
+    fun setVolume(level: Int) {
+        val c = client ?: return
+        val v = c.state.volume ?: return
+        val delta = level.coerceIn(0, if (v.max > 0) v.max else 100) - v.level
+        val key = if (delta > 0) KeyCodes.VOLUME_UP else KeyCodes.VOLUME_DOWN
+        viewModelScope.launch {
+            repeat(minOf(kotlin.math.abs(delta), 100)) {
+                c.sendKey(key)
+                delay(60)
+            }
+        }
+    }
+
+    // ------------------------------------------------------------ macros
+
+    /** Returns an error message, or null on success. */
+    fun saveMacro(existing: SavedMacro?, name: String, script: String): String? {
+        if (name.isBlank()) return "Macro needs a name"
+        val steps = try {
+            Macro.parse(script)
+        } catch (e: MacroException) {
+            return e.message
+        }
+        if (steps.isEmpty()) return "Macro is empty"
+        val macro = SavedMacro(existing?.id ?: java.util.UUID.randomUUID().toString(), name.trim(), script)
+        _state.update { s ->
+            s.copy(macros = if (existing == null) s.macros + macro else s.macros.map { if (it.id == existing.id) macro else it })
+        }
+        store.saveMacros(_state.value.macros)
+        return null
+    }
+
+    fun deleteMacro(macro: SavedMacro) {
+        _state.update { s -> s.copy(macros = s.macros.filterNot { it.id == macro.id }) }
+        store.saveMacros(_state.value.macros)
+    }
+
+    /** Returns an error message (bad script / not connected), or null if started. */
+    fun runMacro(name: String, script: String): String? {
+        val c = client
+        if (c == null || !c.state.connected) return "TV is not connected"
+        val steps = try {
+            Macro.parse(script)
+        } catch (e: MacroException) {
+            return e.message
+        }
+        macroJob?.cancel()
+        val job = viewModelScope.launch(Dispatchers.IO) {
+            try {
+                Macro.run(c, steps) { !isActive }
+            } catch (_: InterruptedException) {
+            }
+        }
+        macroJob = job
+        _state.update { it.copy(runningMacro = name) }
+        job.invokeOnCompletion {
+            if (macroJob === job) _state.update { it.copy(runningMacro = null) }
+        }
+        return null
+    }
+
+    fun stopMacro() {
+        macroJob?.cancel()
     }
 
     fun addApp(app: AppShortcut) {

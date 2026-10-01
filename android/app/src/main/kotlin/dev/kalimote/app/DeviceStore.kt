@@ -10,7 +10,11 @@ data class TvDevice(
     val name: String,
     val host: String,
     val paired: Boolean = false,
+    /** For Wake-on-LAN; entered by the user. */
+    val mac: String? = null,
 )
+
+data class SavedMacro(val id: String = UUID.randomUUID().toString(), val name: String, val script: String)
 
 data class AppShortcut(val name: String, val url: String)
 
@@ -31,14 +35,23 @@ class DeviceStore(context: Context) {
         val arr = JSONArray(prefs.getString("devices", "[]"))
         (0 until arr.length()).map { i ->
             val o = arr.getJSONObject(i)
-            TvDevice(o.getString("id"), o.getString("name"), o.getString("host"), o.optBoolean("paired"))
+            TvDevice(
+                o.getString("id"),
+                o.getString("name"),
+                o.getString("host"),
+                o.optBoolean("paired"),
+                o.optString("mac").takeIf { it.isNotEmpty() },
+            )
         }
     }.getOrDefault(emptyList())
 
     fun saveDevices(devices: List<TvDevice>) {
         val arr = JSONArray()
         devices.forEach {
-            arr.put(JSONObject().put("id", it.id).put("name", it.name).put("host", it.host).put("paired", it.paired))
+            arr.put(
+                JSONObject().put("id", it.id).put("name", it.name).put("host", it.host)
+                    .put("paired", it.paired).put("mac", it.mac ?: ""),
+            )
         }
         prefs.edit().putString("devices", arr.toString()).apply()
     }
@@ -59,6 +72,29 @@ class DeviceStore(context: Context) {
         apps.forEach { arr.put(JSONObject().put("name", it.name).put("url", it.url)) }
         prefs.edit().putString("apps", arr.toString()).apply()
     }
+
+    fun loadMacros(): List<SavedMacro> = runCatching {
+        val arr = JSONArray(prefs.getString("macros", "[]"))
+        (0 until arr.length()).map { i ->
+            val o = arr.getJSONObject(i)
+            SavedMacro(o.getString("id"), o.getString("name"), o.getString("script"))
+        }
+    }.getOrDefault(emptyList())
+
+    fun saveMacros(macros: List<SavedMacro>) {
+        val arr = JSONArray()
+        macros.forEach { arr.put(JSONObject().put("id", it.id).put("name", it.name).put("script", it.script)) }
+        prefs.edit().putString("macros", arr.toString()).apply()
+    }
+
+    /** Sleep timer: when (epoch ms) and which TV; 0 when not set. */
+    var sleepAt: Long
+        get() = prefs.getLong("sleepAt", 0)
+        set(value) = prefs.edit().putLong("sleepAt", value).apply()
+
+    var sleepDeviceId: String?
+        get() = prefs.getString("sleepDevice", null)
+        set(value) = prefs.edit().putString("sleepDevice", value).apply()
 
     var selectedId: String?
         get() = prefs.getString("selected", null)

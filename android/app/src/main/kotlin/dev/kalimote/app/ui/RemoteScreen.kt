@@ -3,6 +3,11 @@ package dev.kalimote.app.ui
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.offset
+import androidx.compose.material.icons.filled.Bedtime
+import dev.kalimote.app.SavedMacro
+import kotlin.math.roundToInt
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -90,6 +95,15 @@ class RemoteActions(
     val pair: () -> Unit,
     val reconnect: () -> Unit,
     val openDevices: () -> Unit,
+    val openLink: (String) -> Unit,
+    val wake: () -> Unit,
+    val setSleep: (Int) -> Unit,
+    val setVolume: (Int) -> Unit,
+    val saveMacro: (SavedMacro?, String, String) -> String?,
+    val deleteMacro: (SavedMacro) -> Unit,
+    val runMacro: (String, String) -> String?,
+    val stopMacro: () -> Unit,
+    val toast: (String) -> Unit,
 )
 
 @Composable
@@ -98,6 +112,10 @@ fun RemoteScreen(state: UiState, actions: RemoteActions, modifier: Modifier = Mo
     var showKeyboard by rememberSaveable { mutableStateOf(false) }
     var showMore by rememberSaveable { mutableStateOf(false) }
     var showAddApp by rememberSaveable { mutableStateOf(false) }
+    var showSleep by rememberSaveable { mutableStateOf(false) }
+    var showVolume by rememberSaveable { mutableStateOf(false) }
+    var editingMacro by remember { mutableStateOf<SavedMacro?>(null) }
+    var showMacroEditor by rememberSaveable { mutableStateOf(false) }
     val connected = state.remote.connected
 
     Column(
@@ -117,8 +135,34 @@ fun RemoteScreen(state: UiState, actions: RemoteActions, modifier: Modifier = Mo
         ) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                 RemoteButton("Power", Modifier.size(56.dp, 44.dp), icon = Icons.Filled.PowerSettingsNew, content = Danger, shape = RoundedCornerShape(22.dp)) { key(KeyCodes.POWER) }
-                RemoteButton("Input", Modifier.size(72.dp, 44.dp), icon = Icons.AutoMirrored.Filled.Input, shape = RoundedCornerShape(22.dp)) { key(KeyCodes.TV_INPUT) }
+                RemoteButton("Input", Modifier.size(56.dp, 44.dp), icon = Icons.AutoMirrored.Filled.Input, shape = RoundedCornerShape(22.dp)) { key(KeyCodes.TV_INPUT) }
                 RemoteButton("Settings", Modifier.size(56.dp, 44.dp), icon = Icons.Filled.Settings, shape = RoundedCornerShape(22.dp)) { key(KeyCodes.SETTINGS) }
+                Box {
+                    RemoteButton(
+                        "Sleep timer",
+                        Modifier.size(56.dp, 44.dp),
+                        icon = Icons.Filled.Bedtime,
+                        shape = RoundedCornerShape(22.dp),
+                        content = if (state.sleepAt > 0) Accent else MaterialTheme.colorScheme.onSurface,
+                    ) {
+                        if (state.selected?.paired == true) showSleep = true else actions.toast("Pair a TV first")
+                    }
+                    if (state.sleepAt > 0) {
+                        val left = ((state.sleepAt - System.currentTimeMillis()) / 60_000.0).roundToInt().coerceAtLeast(0)
+                        Text(
+                            "${left}m",
+                            color = Color.White,
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier
+                                .align(Alignment.TopEnd)
+                                .offset(x = 6.dp, y = (-6).dp)
+                                .clip(RoundedCornerShape(50))
+                                .background(Accent)
+                                .padding(horizontal = 5.dp, vertical = 1.dp),
+                        )
+                    }
+                }
                 RemoteButton(
                     if (state.touchpad) "Use D-pad" else "Use touchpad",
                     Modifier.size(56.dp, 44.dp),
@@ -143,6 +187,7 @@ fun RemoteScreen(state: UiState, actions: RemoteActions, modifier: Modifier = Mo
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                 Rocker(
                     label = state.remote.volume?.let { if (it.muted) "MUTE" else it.level.toString() } ?: "VOL",
+                    onLabelClick = { if (state.remote.volume != null && connected) showVolume = true },
                     up = { RemoteButton("Volume up", Modifier.size(72.dp, 64.dp), text = "+", container = Color.Transparent, repeat = true) { key(KeyCodes.VOLUME_UP) } },
                     down = { RemoteButton("Volume down", Modifier.size(72.dp, 64.dp), text = "−", container = Color.Transparent, repeat = true) { key(KeyCodes.VOLUME_DOWN) } },
                 )
@@ -173,7 +218,36 @@ fun RemoteScreen(state: UiState, actions: RemoteActions, modifier: Modifier = Mo
             MoreButtons(expanded = showMore, onToggle = { showMore = !showMore }, key = key)
 
             Apps(state, actions, onAdd = { showAddApp = true })
+
+            OpenLinkRow(actions.openLink)
+
+            MacrosSection(
+                state,
+                onRun = { m -> actions.runMacro(m.name, m.script)?.let(actions.toast) },
+                onStop = actions.stopMacro,
+                onEdit = { m ->
+                    editingMacro = m
+                    showMacroEditor = true
+                },
+            )
         }
+    }
+
+    if (showSleep) SleepDialog(state.sleepAt, actions.setSleep) { showSleep = false }
+    val volume = state.remote.volume
+    if (showVolume && volume != null) VolumeDialog(volume, actions.setVolume) { showVolume = false }
+    if (showMacroEditor) {
+        val editing = editingMacro
+        MacroDialog(
+            macro = editing,
+            onSave = { name, script -> actions.saveMacro(editing, name, script).also { if (it == null) showMacroEditor = false } },
+            onTry = { script -> actions.runMacro("Test", script) },
+            onDelete = {
+                if (editing != null) actions.deleteMacro(editing)
+                showMacroEditor = false
+            },
+            onDismiss = { showMacroEditor = false },
+        )
     }
 
     if (showKeyboard) KeyboardDialog(onDismiss = { showKeyboard = false }, onText = actions.text, onKey = key)
@@ -196,6 +270,7 @@ private fun StatusBanner(state: UiState, actions: RemoteActions) {
         state.remote.error != null -> "${device.name}: ${state.remote.error}" to ("Retry" to actions.reconnect)
         else -> "Connecting to ${device.name}…" to null
     }
+    val wake = device?.takeIf { it.paired && it.mac != null && !state.remote.connected }
     Surface(
         color = Warn.copy(alpha = 0.18f),
         shape = RoundedCornerShape(12.dp),
@@ -203,6 +278,10 @@ private fun StatusBanner(state: UiState, actions: RemoteActions) {
     ) {
         Row(Modifier.padding(horizontal = 14.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
             Text(text, Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
+            if (wake != null) {
+                Spacer(Modifier.width(8.dp))
+                Button(onClick = actions.wake) { Text("Wake") }
+            }
             if (button != null) {
                 Spacer(Modifier.width(8.dp))
                 Button(onClick = button.second) { Text(button.first) }
@@ -212,7 +291,7 @@ private fun StatusBanner(state: UiState, actions: RemoteActions) {
 }
 
 @Composable
-private fun Rocker(label: String, up: @Composable () -> Unit, down: @Composable () -> Unit) {
+private fun Rocker(label: String, up: @Composable () -> Unit, down: @Composable () -> Unit, onLabelClick: (() -> Unit)? = null) {
     Column(
         Modifier
             .width(72.dp)
@@ -221,7 +300,17 @@ private fun Rocker(label: String, up: @Composable () -> Unit, down: @Composable 
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         up()
-        Text(label, fontSize = 11.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text(
+            label,
+            fontSize = 11.sp,
+            fontWeight = FontWeight.Bold,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = if (onLabelClick != null) {
+                Modifier.clip(RoundedCornerShape(8.dp)).clickable(onClick = onLabelClick).padding(horizontal = 10.dp, vertical = 2.dp)
+            } else {
+                Modifier
+            },
+        )
         down()
     }
 }
