@@ -1,0 +1,159 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+  <meta name="theme-color" content="#111318">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <title>Kalimote</title>
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="bar">
+    <div class="device-picker">
+      <span class="dot" id="status-dot" title="Disconnected"></span>
+      <select id="device-select" aria-label="TV"></select>
+    </div>
+    <button class="icon-btn" id="manage-btn" aria-label="Manage TVs" title="Manage TVs">
+      <svg viewBox="0 0 24 24"><path d="M4 5h16v11H4zM8 20h8M12 16v4" /></svg>
+    </button>
+  </header>
+
+  <div id="banner" class="banner" hidden></div>
+
+  <main id="remote" class="remote">
+    <section class="row top-row">
+      <button class="pill danger" data-key="POWER" aria-label="Power">
+        <svg viewBox="0 0 24 24"><path d="M12 3v9M6.3 6.3a8 8 0 1 0 11.4 0" /></svg>
+      </button>
+      <button class="pill" data-key="TV_INPUT" title="Input">Input</button>
+      <button class="pill" data-key="SETTINGS" aria-label="Settings" title="Settings">
+        <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3" /><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M4.9 19.1 7 17M17 7l2.1-2.1" /></svg>
+      </button>
+      <button class="pill" id="touchpad-toggle" title="Switch between D-pad and touchpad" aria-pressed="false">
+        <svg viewBox="0 0 24 24"><rect x="4" y="3" width="16" height="18" rx="3" /><path d="M9 9l3-3 3 3M9 15l3 3 3-3" /></svg>
+      </button>
+    </section>
+
+    <section class="nav-area">
+      <div class="dpad" id="dpad">
+        <button class="dpad-btn up" data-key="DPAD_UP" data-repeat aria-label="Up"><svg viewBox="0 0 24 24"><path d="M6 15l6-6 6 6" /></svg></button>
+        <button class="dpad-btn right" data-key="DPAD_RIGHT" data-repeat aria-label="Right"><svg viewBox="0 0 24 24"><path d="M9 6l6 6-6 6" /></svg></button>
+        <button class="dpad-btn down" data-key="DPAD_DOWN" data-repeat aria-label="Down"><svg viewBox="0 0 24 24"><path d="M6 9l6 6 6-6" /></svg></button>
+        <button class="dpad-btn left" data-key="DPAD_LEFT" data-repeat aria-label="Left"><svg viewBox="0 0 24 24"><path d="M15 6l-6 6 6 6" /></svg></button>
+        <button class="dpad-ok" data-key="DPAD_CENTER" aria-label="OK">OK</button>
+      </div>
+      <div class="touchpad" id="touchpad" hidden>
+        <span>Swipe to move · Tap to select · Long-press for options</span>
+      </div>
+    </section>
+
+    <section class="row nav-row">
+      <button class="round" data-key="BACK" aria-label="Back" title="Back (Backspace)"><svg viewBox="0 0 24 24"><path d="M9 14 4 9l5-5M4 9h11a5 5 0 0 1 0 10h-3" /></svg></button>
+      <button class="round" data-key="HOME" aria-label="Home" title="Home (H)"><svg viewBox="0 0 24 24"><path d="M3 11l9-7 9 7M5 10v10h14V10" /></svg></button>
+      <button class="round" data-key="MENU" aria-label="Menu" title="Menu (M)"><svg viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h16" /></svg></button>
+      <button class="round" data-key="ASSIST" aria-label="Assistant" title="Assistant"><svg viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="11" rx="3" /><path d="M5 11a7 7 0 0 0 14 0M12 18v3" /></svg></button>
+    </section>
+
+    <section class="row rockers">
+      <div class="rocker">
+        <button data-key="VOLUME_UP" data-repeat aria-label="Volume up">+</button>
+        <span class="rocker-label" id="volume-label">VOL</span>
+        <button data-key="VOLUME_DOWN" data-repeat aria-label="Volume down">−</button>
+      </div>
+      <div class="middle-col">
+        <button class="round" data-key="VOLUME_MUTE" aria-label="Mute" title="Mute"><svg viewBox="0 0 24 24"><path d="M4 9h4l5-4v14l-5-4H4zM17 9l4 6M21 9l-4 6" /></svg></button>
+        <button class="round" id="keyboard-btn" aria-label="Keyboard" title="Type text"><svg viewBox="0 0 24 24"><rect x="2" y="6" width="20" height="12" rx="2" /><path d="M6 10h.01M10 10h.01M14 10h.01M18 10h.01M7 14h10" /></svg></button>
+      </div>
+      <div class="rocker">
+        <button data-key="CHANNEL_UP" aria-label="Channel up"><svg viewBox="0 0 24 24"><path d="M6 15l6-6 6 6" /></svg></button>
+        <span class="rocker-label">CH</span>
+        <button data-key="CHANNEL_DOWN" aria-label="Channel down"><svg viewBox="0 0 24 24"><path d="M6 9l6 6 6-6" /></svg></button>
+      </div>
+    </section>
+
+    <section class="row media-row">
+      <button class="flat" data-key="MEDIA_REWIND" aria-label="Rewind"><svg viewBox="0 0 24 24"><path d="M11 6 4 12l7 6zM20 6l-7 6 7 6z" /></svg></button>
+      <button class="flat" data-key="MEDIA_PREVIOUS" aria-label="Previous"><svg viewBox="0 0 24 24"><path d="M6 6v12M18 6l-9 6 9 6z" /></svg></button>
+      <button class="flat accent" data-key="MEDIA_PLAY_PAUSE" aria-label="Play/Pause" title="Play/Pause (Space)"><svg viewBox="0 0 24 24"><path d="M5 5l8 7-8 7zM16 5v14M20 5v14" /></svg></button>
+      <button class="flat" data-key="MEDIA_NEXT" aria-label="Next"><svg viewBox="0 0 24 24"><path d="M18 6v12M6 6l9 6-9 6z" /></svg></button>
+      <button class="flat" data-key="MEDIA_FAST_FORWARD" aria-label="Fast forward"><svg viewBox="0 0 24 24"><path d="M13 6l7 6-7 6zM4 6l7 6-7 6z" /></svg></button>
+    </section>
+
+    <details class="extras">
+      <summary>More buttons</summary>
+      <div class="numpad">
+        <button data-key="DIGIT_1">1</button><button data-key="DIGIT_2">2</button><button data-key="DIGIT_3">3</button>
+        <button data-key="DIGIT_4">4</button><button data-key="DIGIT_5">5</button><button data-key="DIGIT_6">6</button>
+        <button data-key="DIGIT_7">7</button><button data-key="DIGIT_8">8</button><button data-key="DIGIT_9">9</button>
+        <button data-key="INFO">Info</button><button data-key="DIGIT_0">0</button><button data-key="GUIDE">Guide</button>
+      </div>
+      <div class="colors">
+        <button class="c-red" data-key="PROG_RED" aria-label="Red"></button>
+        <button class="c-green" data-key="PROG_GREEN" aria-label="Green"></button>
+        <button class="c-yellow" data-key="PROG_YELLOW" aria-label="Yellow"></button>
+        <button class="c-blue" data-key="PROG_BLUE" aria-label="Blue"></button>
+      </div>
+      <div class="row small-row">
+        <button class="pill" data-key="CAPTIONS">Captions</button>
+        <button class="pill" data-key="MEDIA_STOP">Stop</button>
+        <button class="pill" data-key="SEARCH">Search</button>
+      </div>
+    </details>
+
+    <section class="apps">
+      <h2>Apps <span class="now-playing" id="current-app"></span></h2>
+      <div class="app-grid" id="app-grid"></div>
+    </section>
+  </main>
+
+  <dialog id="manage-dialog">
+    <form method="dialog" class="dialog-head">
+      <h2>Your TVs</h2>
+      <button class="icon-btn" aria-label="Close">✕</button>
+    </form>
+    <ul class="device-list" id="device-list"></ul>
+    <h3>Found on your network <button class="link" id="rescan-btn" type="button">Rescan</button></h3>
+    <ul class="device-list" id="discovered-list"></ul>
+    <h3>Add by IP address</h3>
+    <form id="add-form" class="add-form">
+      <input name="host" placeholder="192.168.1.50" required autocomplete="off" inputmode="decimal">
+      <input name="name" placeholder="Name (optional)" autocomplete="off">
+      <button class="primary">Add</button>
+    </form>
+    <p class="hint">On the TV, the remote service must be enabled (it is on by default on Google TV / Android TV with Google services). The TV and this server must be on the same network.</p>
+  </dialog>
+
+  <dialog id="pair-dialog">
+    <form id="pair-form">
+      <h2>Pair with <span id="pair-name"></span></h2>
+      <p>Enter the code shown on your TV.</p>
+      <input id="pair-code" name="code" maxlength="6" autocomplete="off" autocapitalize="characters" spellcheck="false" pattern="[0-9A-Fa-f]{6}" required>
+      <p class="error" id="pair-error"></p>
+      <div class="actions">
+        <button type="button" id="pair-cancel">Cancel</button>
+        <button class="primary">Pair</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="text-dialog">
+    <form id="text-form">
+      <h2>Send text</h2>
+      <p class="hint">Focus a text field on the TV first (e.g. search).</p>
+      <input id="text-input" autocomplete="off" placeholder="Type here…">
+      <div class="actions">
+        <button type="button" data-key="DEL">⌫ Delete</button>
+        <button type="button" data-key="ENTER">⏎ Enter</button>
+        <button class="primary">Send</button>
+      </div>
+    </form>
+  </dialog>
+
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+  <script type="module" src="app.js"></script>
+</body>
+</html>

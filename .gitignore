@@ -1,0 +1,13 @@
+node_modules/
+.DS_Store
+*.log
+# Android / Gradle
+.gradle/
+build/
+local.properties
+.idea/
+*.iml
+.kotlin/
+captures/
+*.keystore
+!android/app/debug.keystore
