@@ -12,8 +12,23 @@ android {
         applicationId = "dev.kalimote.app"
         minSdk = 26
         targetSdk = 35
-        versionCode = 1
-        versionName = "0.1.0"
+        // CI passes these for releases: -Pkalimote.versionName=1.2.3 -Pkalimote.versionCode=42
+        versionCode = providers.gradleProperty("kalimote.versionCode").orNull?.toInt() ?: 1
+        versionName = providers.gradleProperty("kalimote.versionName").orNull ?: "0.1.0"
+    }
+
+    signingConfigs {
+        // Release signing key from the environment (set as GitHub secrets).
+        // Without it, release builds fall back to the debug key.
+        val keystore = System.getenv("KALIMOTE_KEYSTORE_FILE")
+        if (keystore != null && file(keystore).exists()) {
+            create("release") {
+                storeFile = file(keystore)
+                storePassword = System.getenv("KALIMOTE_KEYSTORE_PASSWORD")
+                keyAlias = System.getenv("KALIMOTE_KEY_ALIAS")
+                keyPassword = System.getenv("KALIMOTE_KEY_PASSWORD")
+            }
+        }
     }
 
     buildTypes {
@@ -21,9 +36,7 @@ android {
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
-            // Signed with the debug key so CI produces an installable APK.
-            // Configure a real signing config before publishing.
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = signingConfigs.findByName("release") ?: signingConfigs.getByName("debug")
         }
     }
 

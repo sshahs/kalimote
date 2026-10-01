@@ -83,8 +83,7 @@ address and publish the port with `-p 8080:8080`.
 
 ## Android app
 
-Download the APK from the latest [CI run](../../actions/workflows/ci.yml)
-(`kalimote-apk` artifact), or build it:
+Download the APK from the [latest release](../../releases/latest), or build it:
 
 ```bash
 cd android
@@ -101,6 +100,15 @@ The protocol library builds and tests without the Android SDK:
 cd android
 ./gradlew -Pkalimote.jvmOnly=true :atvremote:test
 ```
+
+### Releasing
+
+Push a tag (`git tag v1.2.3 && git push origin v1.2.3`) or run the **Release**
+workflow from the Actions tab. It builds the APK and publishes a GitHub
+Release. To sign with a stable key, so users can upgrade between versions,
+add the repository secrets `KEYSTORE_BASE64` (base64 of a `.jks`),
+`KEYSTORE_PASSWORD`, `KEY_ALIAS` and `KEY_PASSWORD`. Without them, each
+release is signed with a throwaway key.
 
 ## Development
 
