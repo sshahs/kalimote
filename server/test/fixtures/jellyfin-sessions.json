@@ -1,0 +1,46 @@
+[
+  {
+    "Id": "web-session",
+    "Client": "Jellyfin Web",
+    "DeviceName": "Firefox",
+    "DeviceId": "web-1",
+    "ApplicationVersion": "10.10.3",
+    "RemoteEndPoint": "192.168.1.77",
+    "SupportsRemoteControl": true,
+    "PlayState": { "PositionTicks": 0, "IsPaused": false, "IsMuted": false }
+  },
+  {
+    "Id": "tv-session",
+    "Client": "Android TV",
+    "DeviceName": "Living Room TV",
+    "DeviceId": "atv-1",
+    "ApplicationVersion": "0.18.0-debug",
+    "RemoteEndPoint": "::ffff:127.0.0.1",
+    "SupportsRemoteControl": true,
+    "NowPlayingItem": {
+      "Id": "item-42",
+      "Name": "The One Where It Works",
+      "SeriesName": "Kalimote Stories",
+      "ParentIndexNumber": 2,
+      "IndexNumber": 5,
+      "Type": "Episode",
+      "ProductionYear": 2026,
+      "RunTimeTicks": 26000000000,
+      "ImageTags": { "Primary": "abc123" },
+      "MediaStreams": [
+        { "Index": 0, "Type": "Video", "DisplayTitle": "1080p H264" },
+        { "Index": 1, "Type": "Audio", "DisplayTitle": "English - AAC - Stereo", "Language": "eng" },
+        { "Index": 2, "Type": "Audio", "DisplayTitle": "Japanese - AAC - Stereo", "Language": "jpn" },
+        { "Index": 3, "Type": "Subtitle", "DisplayTitle": "English - SRT", "Language": "eng" },
+        { "Index": 4, "Type": "Subtitle", "DisplayTitle": "Spanish - SRT", "Language": "spa" }
+      ]
+    },
+    "PlayState": {
+      "PositionTicks": 6000000000,
+      "IsPaused": false,
+      "IsMuted": false,
+      "AudioStreamIndex": 1,
+      "SubtitleStreamIndex": -1
+    }
+  }
+]

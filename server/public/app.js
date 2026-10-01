@@ -28,6 +28,7 @@ const DEFAULT_APPS = [
   { name: 'Disney+', url: 'market://launch?id=com.disney.disneyplus' },
   { name: 'Spotify', url: 'market://launch?id=com.spotify.tv.android' },
   { name: 'Plex', url: 'market://launch?id=com.plexapp.android' },
+  { name: 'Jellyfin', url: 'market://launch?id=org.jellyfin.androidtv' },
 ];
 
 const state = {
@@ -38,6 +39,8 @@ const state = {
   touchpad: store.get('touchpad', false),
   apps: store.get('apps', DEFAULT_APPS),
   macros: [],
+  jellyfin: { configured: false, url: '' },
+  jf: null, // { session, fetchedAt } for the selected TV
   pairingDevice: null,
 };
 
@@ -67,6 +70,7 @@ function connectSocket() {
     if (msg.event === 'devices') {
       state.devices = msg.devices;
       state.discovered = msg.discovered;
+      state.jellyfin = msg.jellyfin ?? state.jellyfin;
       if (JSON.stringify(msg.macros ?? []) !== JSON.stringify(state.macros)) {
         state.macros = msg.macros ?? [];
         renderMacros();
@@ -501,7 +505,9 @@ function prettyApp(pkg) {
     'com.spotify.tv.android': 'Spotify',
     'com.plexapp.android': 'Plex',
   };
-  return known[pkg] ?? pkg;
+  if (known[pkg]) return known[pkg];
+  if (/^org\.jellyfin\./.test(pkg)) return /\.debug$/.test(pkg) ? 'Jellyfin (debug)' : 'Jellyfin';
+  return pkg;
 }
 
 function render() {
@@ -565,6 +571,7 @@ function render() {
   $('#touchpad').hidden = !state.touchpad;
 
   renderManage();
+  renderJellyfin();
 }
 
 // ---------------------------------------------------------------- open link
@@ -717,11 +724,168 @@ $('#edit-form').addEventListener('submit', async (e) => {
 });
 $('#edit-cancel').addEventListener('click', () => $('#edit-dialog').close());
 
-for (const id of ['#sleep-dialog', '#volume-dialog', '#macro-dialog', '#edit-dialog']) {
+for (const id of ['#sleep-dialog', '#volume-dialog', '#macro-dialog', '#edit-dialog', '#jellyfin-dialog']) {
   $(id).addEventListener('click', (e) => {
     if (e.target === e.currentTarget) e.currentTarget.close();
   });
 }
+
+// ---------------------------------------------------------------- Jellyfin
+
+const fmtTime = (ms) => {
+  const t = Math.max(0, Math.floor(ms / 1000));
+  const h = Math.floor(t / 3600);
+  const m = Math.floor((t % 3600) / 60);
+  const sec = String(t % 60).padStart(2, '0');
+  return h ? `${h}:${String(m).padStart(2, '0')}:${sec}` : `${m}:${sec}`;
+};
+
+let jfSeeking = false;
+let jfPosterFor = null;
+
+function jfVisible() {
+  const d = current();
+  return !!(d?.state?.connected && d.jellyfinApp);
+}
+
+/** Current position, advanced locally between polls while playing. */
+function jfPosition(sess) {
+  if (!sess) return 0;
+  const elapsed = sess.paused || !state.jf ? 0 : Date.now() - state.jf.fetchedAt;
+  return Math.min(sess.positionMs + elapsed, sess.item?.runtimeMs || Infinity);
+}
+
+function fillSelect(select, items, withOff, selectedIndex) {
+  if (document.activeElement === select) return;
+  const opts = [
+    ...(withOff ? [new Option('Off', '-1', false, selectedIndex === -1)] : []),
+    ...items.map((t) => new Option(t.label, String(t.index), false, t.selected)),
+  ];
+  if (!opts.length) opts.push(new Option('—', ''));
+  select.replaceChildren(...opts);
+  select.disabled = items.length === 0;
+}
+
+function renderJellyfin() {
+  const d = current();
+  const show = jfVisible();
+  $('#jellyfin').hidden = !show;
+  $('#jf-manage-status').textContent = state.jellyfin.configured
+    ? `Connected to ${state.jellyfin.url}`
+    : "Optional: shows what's playing in Jellyfin and lets you seek and change tracks.";
+  $('#jf-manage-btn').textContent = state.jellyfin.configured ? 'Change' : 'Set up';
+  if (!show) return;
+  $('#jf-debug').hidden = !d.jellyfinApp.debug;
+  $('#jf-setup').hidden = state.jellyfin.configured;
+  const sess = state.jf?.deviceId === d.id ? state.jf.session : null;
+  const item = sess?.item;
+  $('#jf-now').hidden = !item;
+  $('#jf-nosession').hidden = !state.jellyfin.configured || !state.jf || !!item;
+  if (!item) return;
+
+  if (jfPosterFor !== item.id) {
+    jfPosterFor = item.id;
+    const token = store.get('token', '');
+    const q = new URLSearchParams({ ...(item.imageTag ? { tag: item.imageTag } : {}), ...(token ? { token } : {}) });
+    $('#jf-poster').src = `/api/jellyfin/image/${encodeURIComponent(item.id)}?${q}`;
+  }
+  $('#jf-title').textContent = item.name;
+  const sub = [];
+  if (item.seriesName) sub.push(item.seriesName);
+  if (item.season != null && item.episode != null) sub.push(`S${item.season} · E${item.episode}`);
+  else if (item.year) sub.push(String(item.year));
+  if (sess.paused) sub.push('Paused');
+  $('#jf-sub').textContent = sub.join(' · ');
+  renderJellyfinTime();
+  fillSelect($('#jf-audio'), sess.audio, false);
+  fillSelect($('#jf-subs'), sess.subtitles, true, sess.subtitleIndex);
+}
+
+function renderJellyfinTime() {
+  const sess = state.jf?.session;
+  if (!sess?.item || $('#jf-now').hidden) return;
+  const pos = jfPosition(sess);
+  const seek = $('#jf-seek');
+  seek.max = String(sess.item.runtimeMs || 1);
+  if (!jfSeeking) seek.value = String(pos);
+  $('#jf-pos').textContent = fmtTime(jfSeeking ? Number(seek.value) : pos);
+  $('#jf-dur').textContent = fmtTime(sess.item.runtimeMs);
+}
+
+let jfPolling = false;
+async function pollJellyfin() {
+  const d = current();
+  if (jfPolling || !jfVisible() || !state.jellyfin.configured || !socketUp) return;
+  jfPolling = true;
+  try {
+    const st = await call('jellyfin.status', { device: d.id });
+    state.jf = { deviceId: d.id, session: st.session, fetchedAt: Date.now() };
+  } catch (e) {
+    state.jf = { deviceId: d.id, session: null, fetchedAt: Date.now(), error: e.message };
+  } finally {
+    jfPolling = false;
+    renderJellyfin();
+  }
+}
+setInterval(pollJellyfin, 2000);
+setInterval(renderJellyfinTime, 1000);
+
+function jfControl(action, value) {
+  const d = current();
+  if (!d) return;
+  call('jellyfin.control', { device: d.id, action, value })
+    .then(() => setTimeout(pollJellyfin, 300))
+    .catch(report);
+}
+
+document.addEventListener('click', (e) => {
+  const b = e.target.closest('[data-jf]');
+  if (b) jfControl(b.dataset.jf, b.dataset.value !== undefined ? Number(b.dataset.value) : undefined);
+});
+$('#jf-seek').addEventListener('input', () => {
+  jfSeeking = true;
+  renderJellyfinTime();
+});
+$('#jf-seek').addEventListener('change', (e) => {
+  jfSeeking = false;
+  jfControl('seek', Number(e.target.value));
+});
+$('#jf-audio').addEventListener('change', (e) => jfControl('audio', Number(e.target.value)));
+$('#jf-subs').addEventListener('change', (e) => jfControl('subtitle', Number(e.target.value)));
+$('#jf-message').addEventListener('click', () => {
+  const text = prompt('Message to show on the TV');
+  if (text) jfControl('message', text);
+});
+
+function openJellyfinSettings() {
+  const f = $('#jellyfin-form');
+  f.url.value = state.jellyfin.url || '';
+  f.apiKey.value = '';
+  f.apiKey.placeholder = state.jellyfin.configured ? 'Saved (leave blank to keep)' : 'Paste API key';
+  $('#jellyfin-remove').hidden = !state.jellyfin.configured;
+  $('#jellyfin-error').textContent = '';
+  $('#jellyfin-dialog').showModal();
+}
+for (const id of ['#jf-settings', '#jf-setup-btn', '#jf-manage-btn']) $(id).addEventListener('click', openJellyfinSettings);
+$('#jellyfin-cancel').addEventListener('click', () => $('#jellyfin-dialog').close());
+$('#jellyfin-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  $('#jellyfin-error').textContent = 'Connecting…';
+  try {
+    const info = await call('jellyfin.set', { url: e.target.url.value, apiKey: e.target.apiKey.value });
+    $('#jellyfin-dialog').close();
+    toast(`Connected to ${info.name} (Jellyfin ${info.version})`);
+    pollJellyfin();
+  } catch (err) {
+    $('#jellyfin-error').textContent = err.message;
+  }
+});
+$('#jellyfin-remove').addEventListener('click', async () => {
+  await call('jellyfin.set', { url: '' }).catch(report);
+  state.jf = null;
+  $('#jellyfin-dialog').close();
+  toast('Jellyfin server removed');
+});
 
 renderApps();
 renderMacros();

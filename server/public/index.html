@@ -86,6 +86,56 @@
       <button class="flat" data-key="MEDIA_FAST_FORWARD" aria-label="Fast forward"><svg viewBox="0 0 24 24"><path d="M13 6l7 6-7 6zM4 6l7 6-7 6z" /></svg></button>
     </section>
 
+    <section class="jellyfin" id="jellyfin" hidden>
+      <header class="jf-head">
+        <span class="jf-logo" aria-hidden="true"></span>
+        <h2>Jellyfin</h2>
+        <span class="jf-badge" id="jf-debug" hidden title="Debug build of Jellyfin">debug</span>
+        <button class="icon-btn small" id="jf-settings" aria-label="Jellyfin server settings" title="Jellyfin server settings">
+          <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3" /><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M4.9 19.1 7 17M17 7l2.1-2.1" /></svg>
+        </button>
+      </header>
+
+      <div class="jf-now" id="jf-now" hidden>
+        <img class="jf-poster" id="jf-poster" alt="">
+        <div class="jf-meta">
+          <div class="jf-title" id="jf-title"></div>
+          <div class="jf-sub" id="jf-sub"></div>
+          <input type="range" id="jf-seek" min="0" max="1000" value="0" aria-label="Position">
+          <div class="jf-times"><span id="jf-pos">0:00</span><span id="jf-dur">0:00</span></div>
+        </div>
+        <div class="jf-controls">
+          <button data-jf="previous" aria-label="Previous"><svg viewBox="0 0 24 24"><path d="M6 6v12M18 6l-9 6 9 6z" /></svg></button>
+          <button data-jf="seekBy" data-value="-10000" aria-label="Back 10 seconds">−10s</button>
+          <button data-jf="playpause" class="accent" id="jf-playpause" aria-label="Play/Pause"><svg viewBox="0 0 24 24"><path d="M5 5l8 7-8 7zM16 5v14M20 5v14" /></svg></button>
+          <button data-jf="seekBy" data-value="30000" aria-label="Forward 30 seconds">+30s</button>
+          <button data-jf="next" aria-label="Next"><svg viewBox="0 0 24 24"><path d="M18 6v12M6 6l9 6-9 6z" /></svg></button>
+          <button data-jf="stop" aria-label="Stop"><svg viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="1" /></svg></button>
+        </div>
+        <div class="jf-tracks">
+          <label>Audio <select id="jf-audio"></select></label>
+          <label>Subtitles <select id="jf-subs"></select></label>
+          <button class="pill" id="jf-message">Message TV…</button>
+        </div>
+      </div>
+      <p class="hint jf-setup" id="jf-setup" hidden>
+        Connect your Jellyfin server to see what's playing, seek, and switch audio and subtitle tracks.
+        <button class="link" type="button" id="jf-setup-btn">Set up</button>
+      </p>
+      <p class="hint" id="jf-nosession" hidden>Nothing playing in Jellyfin on this TV right now.</p>
+
+      <div class="jf-keys">
+        <button class="pill" data-key="MEDIA_REWIND" title="Skip back">« Skip</button>
+        <button class="pill" data-key="MEDIA_FAST_FORWARD" title="Skip forward">Skip »</button>
+        <button class="pill" data-key="CAPTIONS" title="Subtitles">Subtitles</button>
+        <button class="pill" data-key="MEDIA_AUDIO_TRACK" title="Audio track">Audio</button>
+        <button class="pill" data-key="MENU" title="Player options">Options</button>
+        <button class="pill" data-key="INFO" title="Info">Info</button>
+        <button class="pill" data-key="MEDIA_STOP" title="Stop">Stop</button>
+        <button class="pill" data-key="SEARCH" title="Search">Search</button>
+      </div>
+    </section>
+
     <details class="extras">
       <summary>More buttons</summary>
       <div class="numpad">
@@ -130,6 +180,8 @@
     <ul class="device-list" id="device-list"></ul>
     <h3>Found on your network <button class="link" id="rescan-btn" type="button">Rescan</button></h3>
     <ul class="device-list" id="discovered-list"></ul>
+    <h3>Jellyfin server <button class="link" id="jf-manage-btn" type="button">Set up</button></h3>
+    <p class="hint" id="jf-manage-status">Optional: shows what's playing in Jellyfin and lets you seek and change tracks.</p>
     <h3>Add by IP address</h3>
     <form id="add-form" class="add-form">
       <input name="host" placeholder="192.168.1.50" required autocomplete="off" inputmode="decimal">
@@ -228,6 +280,25 @@
       <div class="actions">
         <button type="button" id="edit-cancel">Cancel</button>
         <button class="primary">Save</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="jellyfin-dialog">
+    <form id="jellyfin-form">
+      <h2>Jellyfin server</h2>
+      <label class="field">Server URL
+        <input name="url" type="url" placeholder="http://192.168.1.10:8096" autocomplete="off" spellcheck="false">
+      </label>
+      <label class="field">API key
+        <input name="apiKey" type="password" autocomplete="off" spellcheck="false">
+      </label>
+      <p class="hint">Create one in Jellyfin: <b>Dashboard → API Keys → +</b>. The key stays on the Kalimote server and is never sent to browsers.</p>
+      <p class="error" id="jellyfin-error"></p>
+      <div class="actions">
+        <button type="button" id="jellyfin-remove">Remove</button>
+        <button type="button" id="jellyfin-cancel">Cancel</button>
+        <button class="primary">Test &amp; save</button>
       </div>
     </form>
   </dialog>

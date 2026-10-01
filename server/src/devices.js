@@ -7,6 +7,7 @@ import { PairingSession, PAIRING_PORT } from './protocol/pairing.js';
 import { RemoteConnection, REMOTE_PORT } from './protocol/remote.js';
 import { parseMacro, runMacro } from './macros.js';
 import { wake, lookupMac, normalizeMac } from './wol.js';
+import { JellyfinClient, detectJellyfin } from './jellyfin.js';
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -30,6 +31,7 @@ export class DeviceManager extends EventEmitter {
     this.identity = this.loadIdentity();
     for (const d of this.readJson('devices.json', [])) this.devices.set(d.id, d);
     this.macros = this.readJson('macros.json', []);
+    this.jellyfin = this.readJson('jellyfin.json', null); // { url, apiKey }
   }
 
   readJson(file, fallback) {
@@ -70,10 +72,17 @@ export class DeviceManager extends EventEmitter {
       state: this.connections.get(d.id)?.state ?? { connected: false },
       sleepAt: this.sleepTimers.get(d.id)?.at ?? null,
       runningMacro: this.running.get(d.id)?.name ?? null,
+      jellyfinApp: detectJellyfin(this.connections.get(d.id)?.state.currentApp),
     }));
     const knownHosts = new Set(known.map((d) => d.host));
     const discovered = [...this.discovered.values()].filter((d) => !knownHosts.has(d.host));
-    return { devices: known, discovered, macros: this.macros };
+    return {
+      devices: known,
+      discovered,
+      macros: this.macros,
+      // Never expose the API key to the browser.
+      jellyfin: { configured: !!this.jellyfin?.apiKey, url: this.jellyfin?.url ?? '' },
+    };
   }
 
   /** Looks a device up by id, or by name (case-insensitive) for API convenience. */
@@ -389,6 +398,46 @@ export class DeviceManager extends EventEmitter {
     this.discovered.clear();
     this.browser?.update?.();
     this.changed();
+  }
+
+  // ---------------------------------------------------------------- Jellyfin
+
+  jellyfinClient() {
+    if (!this.jellyfin?.apiKey) throw new Error('Jellyfin server is not set up');
+    return new JellyfinClient(this.jellyfin);
+  }
+
+  /** Saves server settings after checking them. Empty url removes them; empty apiKey keeps the old one. */
+  async setJellyfin({ url, apiKey }) {
+    if (!String(url ?? '').trim()) {
+      this.jellyfin = null;
+      fs.rmSync(path.join(this.dataDir, 'jellyfin.json'), { force: true });
+      this.changed();
+      return null;
+    }
+    const config = { url: String(url).trim().replace(/\/+$/, ''), apiKey: String(apiKey ?? '').trim() || this.jellyfin?.apiKey };
+    const info = await new JellyfinClient(config).info();
+    this.jellyfin = config;
+    this.writeJson('jellyfin.json', config, 0o600);
+    this.changed();
+    return info;
+  }
+
+  /** What is playing in Jellyfin on this TV (null session if nothing / not set up). */
+  async jellyfinStatus(id) {
+    const d = this.get(id);
+    const app = detectJellyfin(this.connections.get(d.id)?.state.currentApp);
+    if (!this.jellyfin?.apiKey) return { configured: false, app, session: null };
+    const session = await this.jellyfinClient().sessionFor(d.host);
+    return { configured: true, app, session };
+  }
+
+  async jellyfinControl(id, action, value) {
+    const d = this.get(id);
+    const client = this.jellyfinClient();
+    const session = await client.sessionFor(d.host);
+    if (!session) throw new Error('No Jellyfin session found for this TV');
+    await client.control(session, action, value);
   }
 
   close() {

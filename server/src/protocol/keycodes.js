@@ -46,6 +46,7 @@ export const KeyCode = {
   PROG_YELLOW: 185,
   PROG_BLUE: 186,
   ASSIST: 219,
+  MEDIA_AUDIO_TRACK: 222,
   SLEEP: 223,
   WAKEUP: 224,
 };

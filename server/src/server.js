@@ -96,6 +96,12 @@ async function handle(manager, msg) {
       return manager.runMacro(device, { macro: msg.macro, script: msg.script });
     case 'macro.stop':
       return manager.stopMacro(device);
+    case 'jellyfin.set':
+      return manager.setJellyfin({ url: msg.url, apiKey: msg.apiKey });
+    case 'jellyfin.status':
+      return manager.jellyfinStatus(device);
+    case 'jellyfin.control':
+      return manager.jellyfinControl(device, msg.action, msg.value);
     default:
       throw new Error(`Unknown operation: ${op}`);
   }
@@ -128,7 +134,9 @@ function readBody(req, limit = 64 * 1024) {
 /**
  * REST API for automation (Home Assistant, iOS Shortcuts, curl):
  *   GET  /api/devices
- *   POST /api/devices/:device/{key,text,open,power,wake,volume,sleep,macro}
+ *   GET  /api/devices/:device/jellyfin       what Jellyfin is playing on the TV
+ *   POST /api/devices/:device/{key,text,open,power,wake,volume,sleep,macro,jellyfin}
+ *   GET  /api/jellyfin/image/:itemId?tag=    poster proxy (keeps the API key server-side)
  * :device is the device id or its name. Auth: "Authorization: Bearer <token>"
  * or ?token=, when KALIMOTE_TOKEN is set.
  */
@@ -141,6 +149,21 @@ async function handleApi(manager, req, res, url) {
     if (parts[1] === 'devices' && parts.length === 2 && req.method === 'GET') {
       const { devices, macros } = manager.list();
       return send(200, { devices, macros });
+    }
+    if (parts[1] === 'jellyfin' && parts[2] === 'image' && parts.length === 4 && req.method === 'GET') {
+      const upstream = await manager.jellyfinClient().image(parts[3], url.searchParams.get('tag'));
+      res.writeHead(200, {
+        'content-type': upstream.headers.get('content-type') ?? 'image/jpeg',
+        'cache-control': 'private, max-age=86400',
+        // Images only: an SVG from the upstream server must never run script in our origin.
+        'content-security-policy': "default-src 'none'; style-src 'unsafe-inline'; sandbox",
+        'x-content-type-options': 'nosniff',
+      });
+      res.end(Buffer.from(await upstream.arrayBuffer()));
+      return;
+    }
+    if (parts[1] === 'devices' && parts.length === 4 && parts[3] === 'jellyfin' && req.method === 'GET') {
+      return send(200, await manager.jellyfinStatus(manager.get(parts[2]).id));
     }
     if (parts[1] === 'devices' && parts.length === 3 && req.method === 'GET') {
       const id = manager.get(parts[2]).id;
@@ -159,6 +182,7 @@ async function handleApi(manager, req, res, url) {
         volume: () => manager.setVolume(device, body.level),
         sleep: () => manager.setSleepTimer(device, body.minutes ?? 0),
         macro: () => manager.runMacro(device, { macro: body.name ?? body.macro, script: body.script }),
+        jellyfin: () => manager.jellyfinControl(device, body.action, body.value),
       };
       if (!ops[action]) return send(404, { ok: false, error: `Unknown action: ${action}` });
       const result = await ops[action]();
