@@ -47,14 +47,19 @@ Pair once with the code on your TV screen (Fire TV: one tap on an *Allow* prompt
 | ⏯️ | Media keys, number pad, colour buttons, captions, guide, input, settings, Assistant | ✅ | ✅ |
 | ⌨️ | **Type text** into search boxes on the TV | ✅ | ✅ |
 | 🚀 | **One-tap app shortcuts** (YouTube, Netflix, Prime Video, Disney+, …), customisable | ✅ | ✅ |
+| 📋 | **App picker**: every app installed on a Fire TV, or a catalog of popular apps on Google TV | ✅ | ✅ |
 | 🔗 | **Open any link on the TV**: paste a YouTube or Netflix URL | ✅ | ✅ |
 | 📤 | **Share to TV** from any app's share sheet | | ✅ |
 | 🧩 | **Macros**: chain keys, waits, text and links into one button | ✅ | ✅ |
 | 🪼 | **Jellyfin mode**: extra buttons when Jellyfin (incl. debug builds) is on screen, plus now-playing, seek and track switching with your server | ✅ | ✅ |
+| 🎞️ | **Jellyfin library**: browse and search your server, tap to play on the TV (Jellyfin is opened there first if needed) | ✅ | ✅ |
+| 📸 | **Fire TV screenshot**, with live refresh and save | ✅ | ✅ |
+| 📦 | **Install an APK on a Fire TV** from your computer or phone, no Downloader app needed | ✅ | ✅ |
 | 🌙 | **Sleep timer**: turns the TV off later, only if it's on | ✅ | ✅ |
 | ⚡ | **Wake-on-LAN** for TVs that drop off the network when off | ✅ (MAC auto-detected) | ✅ |
 | 📺 | Shows the **app playing** on the TV and its power state | ✅ | ✅ |
 | 🔘 | Phone **volume buttons** control the TV | | ✅ |
+| 🔒 | **Lock-screen media controls**: a media notification, and the volume buttons control the TV even when the phone is locked (opt-in) | | ✅ |
 | 🧱 | **Home-screen widget**: power, volume, play/pause, mute without opening the app | | ✅ |
 | 🎛️ | **Quick Settings tiles** for TV power and play/pause | | ✅ |
 | 📌 | **Launcher shortcuts** (long-press the icon): power, play/pause and your macros | | ✅ |
@@ -70,6 +75,12 @@ Pair once with the code on your TV screen (Fire TV: one tap on an *Allow* prompt
     <td align="center"><img src="docs/screenshots/touchpad.png" width="200"><br><sub>Touchpad mode</sub></td>
     <td align="center"><img src="docs/screenshots/macro-editor.png" width="200"><br><sub>Macro editor</sub></td>
     <td align="center"><img src="docs/screenshots/sleep-timer.png" width="200"><br><sub>Sleep timer</sub></td>
+  </tr>
+  <tr>
+    <td align="center"><img src="docs/screenshots/app-picker.png" width="200"><br><sub>App picker</sub></td>
+    <td align="center"><img src="docs/screenshots/jellyfin-library.png" width="200"><br><sub>Jellyfin library</sub></td>
+    <td align="center"><img src="docs/screenshots/jellyfin.png" width="200"><br><sub>Jellyfin now playing</sub></td>
+    <td></td>
   </tr>
 </table>
 
@@ -195,6 +206,7 @@ When the TV reports that **Jellyfin** is in the foreground, Kalimote adds a Jell
 - a **draggable seek bar** plus exact **−10 s / +30 s**, previous/next and stop
 - **audio and subtitle track pickers**
 - **Message TV…** to pop a notice up on the screen
+- a **library browser** (*Library* in the panel, or *Browse Jellyfin library* under Apps): continue watching, latest additions, your libraries and search. Tap a movie or episode to play it on the TV; if Jellyfin isn't open there yet, Kalimote opens it and waits for it to sign in
 
 Kalimote finds the TV's Jellyfin session by IP address. On the web remote the API key stays on the Kalimote server and is never sent to browsers.
 
@@ -210,6 +222,12 @@ Fire OS has no Google services, so Fire TV can't use the Google TV remote protoc
 3. A prompt **"Allow USB debugging?"** appears on the TV. Tick **Always allow from this computer** and choose **Allow**.
 
 Everything works the same way as on Google TV: D-pad, keys, long press, text, apps and links, power with real on/off state, current app, macros, sleep timer, widgets and Jellyfin mode. Fire TV doesn't report its volume level, so the volume slider is hidden; volume buttons still work through HDMI-CEC.
+
+Fire TV also gets a few extras that ADB makes possible:
+
+- **App picker** lists every app installed on the TV
+- **Screenshot** shows what's on the TV, with a *Live* option that refreshes every 2 seconds (some DRM video shows as black)
+- **Install APK** uploads an APK from your computer (web) or phone (Android) and installs it, with progress
 
 > ADB debugging lets any trusted computer control the device. Kalimote only gets access after you tap *Allow*, and you can revoke it under *Developer options → Revoke USB debugging authorisations*.
 
@@ -231,6 +249,10 @@ The web server exposes a small JSON API, so Home Assistant, iOS Shortcuts, Taske
 | `POST /api/devices/:device/macro` | `{"name": "Bedtime"}` or `{"script": "HOME, wait 1s"}` | Run a macro |
 | `GET /api/devices/:device/jellyfin` | | What Jellyfin is playing on the TV |
 | `POST /api/devices/:device/jellyfin` | `{"action": "seekBy", "value": 30000}` | `playpause` `stop` `next` `previous` `seek` `seekBy` `subtitle` `audio` `message` |
+| `POST /api/devices/:device/jellyfin-play` | `{"itemId": "…"}` | Play a Jellyfin item on the TV, opening Jellyfin first if needed |
+| `GET /api/devices/:device/apps` | | Installed apps (Fire TV) or the popular-apps catalog |
+| `GET /api/devices/:device/screenshot` | | PNG of the screen (Fire TV) |
+| `POST /api/devices/:device/install` | raw APK bytes | Install an APK (Fire TV), e.g. `curl --data-binary @app.apk` |
 
 ```bash
 curl -X POST http://kalimote.local:8080/api/devices/Living%20Room%20TV/power \
