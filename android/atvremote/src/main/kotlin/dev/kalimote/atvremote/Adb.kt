@@ -137,11 +137,16 @@ class AdbConnection(
         private set
     var onClose: (() -> Unit)? = null
 
+    /** One stream. Writes wait for the device's OKAY (flow control). */
     private class Stream {
         val out = ByteArrayOutputStream()
         val done = CountDownLatch(1)
+        val opened = CountDownLatch(1)
+        val okays = java.util.concurrent.Semaphore(0)
+        val dataLock = Object()
         @Volatile var remoteId = 0
         @Volatile var error: IOException? = null
+        @Volatile var closed = false
     }
 
     private fun write(bytes: ByteArray) = synchronized(writeLock) {
@@ -228,15 +233,23 @@ class AdbConnection(
                     continue
                 }
                 when (m.command) {
-                    AdbProtocol.OKAY -> stream.remoteId = m.arg0
+                    AdbProtocol.OKAY -> if (stream.remoteId == 0) {
+                        stream.remoteId = m.arg0
+                        stream.opened.countDown()
+                    } else {
+                        stream.okays.release()
+                    }
                     AdbProtocol.WRTE -> {
-                        synchronized(stream.out) { stream.out.write(m.data) }
                         write(AdbProtocol.encode(AdbProtocol.OKAY, m.arg1, m.arg0))
+                        synchronized(stream.dataLock) {
+                            stream.out.write(m.data)
+                            stream.dataLock.notifyAll()
+                        }
                     }
                     AdbProtocol.CLSE -> {
                         streams.remove(m.arg1)
                         if (stream.remoteId != 0) write(AdbProtocol.encode(AdbProtocol.CLSE, m.arg1, m.arg0))
-                        stream.done.countDown()
+                        finish(stream, null)
                     }
                 }
             }
@@ -248,33 +261,129 @@ class AdbConnection(
         }
     }
 
-    /** Runs a shell command and returns its output. Blocking. */
-    fun shell(command: String, timeoutMs: Long = 10_000): String {
+    private fun finish(stream: Stream, error: IOException?) {
+        synchronized(stream) {
+            if (stream.closed) return
+            if (error != null) stream.error = error
+            stream.closed = true
+        }
+        stream.opened.countDown()
+        stream.okays.release(1_000_000) // wake any writer
+        synchronized(stream.dataLock) { stream.dataLock.notifyAll() }
+        stream.done.countDown()
+    }
+
+    private fun open(service: String, timeoutMs: Long): Pair<Int, Stream> {
         if (!isOpen) throw AdbException("Not connected", AdbException.Code.CLOSED)
         val id = nextId.getAndIncrement()
         val stream = Stream()
         streams[id] = stream
         try {
-            write(AdbProtocol.encode(AdbProtocol.OPEN, id, 0, "shell:$command\u0000".toByteArray()))
+            write(AdbProtocol.encode(AdbProtocol.OPEN, id, 0, "$service\u0000".toByteArray()))
         } catch (e: IOException) {
             streams.remove(id)
             throw AdbException("Connection closed", AdbException.Code.CLOSED)
         }
+        if (!stream.opened.await(timeoutMs, TimeUnit.MILLISECONDS)) {
+            streams.remove(id)
+            throw AdbException("Timed out opening $service", AdbException.Code.TIMEOUT)
+        }
+        stream.error?.let { throw it }
+        if (stream.remoteId == 0) throw AdbException("Device refused ${service.substringBefore(':')}", AdbException.Code.CLOSED)
+        return id to stream
+    }
+
+    /** Runs a command and returns its raw output (exec: keeps binary output intact). Blocking. */
+    fun exec(command: String, timeoutMs: Long = 10_000, service: String = "exec"): ByteArray {
+        val (id, stream) = open("$service:$command", timeoutMs)
         if (!stream.done.await(timeoutMs, TimeUnit.MILLISECONDS)) {
             streams.remove(id)
             throw AdbException("Command timed out: $command", AdbException.Code.TIMEOUT)
         }
         stream.error?.let { throw it }
-        return synchronized(stream.out) { stream.out.toString(Charsets.UTF_8.name()) }
+        return synchronized(stream.dataLock) { stream.out.toByteArray() }
+    }
+
+    /** Runs a shell command and returns its output. Blocking. */
+    fun shell(command: String, timeoutMs: Long = 10_000): String =
+        exec(command, timeoutMs, "shell").toString(Charsets.UTF_8)
+
+    private fun writeStream(id: Int, stream: Stream, data: ByteArray, timeoutMs: Long) {
+        if (stream.closed) throw stream.error ?: AdbException("Stream closed", AdbException.Code.CLOSED)
+        write(AdbProtocol.encode(AdbProtocol.WRTE, id, stream.remoteId, data))
+        if (!stream.okays.tryAcquire(timeoutMs, TimeUnit.MILLISECONDS)) {
+            throw AdbException("Timed out writing to device", AdbException.Code.TIMEOUT)
+        }
+        if (stream.closed && stream.error != null) throw stream.error!!
+    }
+
+    private fun readExactly(stream: Stream, n: Int, timeoutMs: Long): ByteArray {
+        val deadline = System.currentTimeMillis() + timeoutMs
+        synchronized(stream.dataLock) {
+            while (stream.out.size() < n) {
+                stream.error?.let { throw it }
+                if (stream.closed) throw AdbException("Stream closed", AdbException.Code.CLOSED)
+                val left = deadline - System.currentTimeMillis()
+                if (left <= 0) throw AdbException("Timed out reading from device", AdbException.Code.TIMEOUT)
+                stream.dataLock.wait(left)
+            }
+            val all = stream.out.toByteArray()
+            stream.out.reset()
+            stream.out.write(all, n, all.size - n)
+            return all.copyOfRange(0, n)
+        }
+    }
+
+    /**
+     * Uploads [input] to [remotePath] with the ADB sync protocol. Blocking.
+     * [onProgress] receives the number of bytes sent so far.
+     */
+    fun push(input: java.io.InputStream, remotePath: String, mode: Int = 420, onProgress: (Long) -> Unit = {}, timeoutMs: Long = 30_000) {
+        val (id, stream) = open("sync:", timeoutMs)
+        fun req(tag: String, length: Int, payload: ByteArray = ByteArray(0), payloadLen: Int = payload.size): ByteArray {
+            val b = ByteBuffer.allocate(8 + payloadLen).order(ByteOrder.LITTLE_ENDIAN)
+            b.put(tag.toByteArray(Charsets.US_ASCII)).putInt(length).put(payload, 0, payloadLen)
+            return b.array()
+        }
+        try {
+            val spec = "$remotePath,$mode".toByteArray()
+            writeStream(id, stream, req("SEND", spec.size, spec), timeoutMs)
+            val chunk = ByteArray(64 * 1024)
+            var sent = 0L
+            while (true) {
+                var n = 0
+                while (n < chunk.size) {
+                    val r = input.read(chunk, n, chunk.size - n)
+                    if (r < 0) break
+                    n += r
+                }
+                if (n == 0) break
+                writeStream(id, stream, req("DATA", n, chunk, n), timeoutMs)
+                sent += n
+                onProgress(sent)
+                if (n < chunk.size) break
+            }
+            writeStream(id, stream, req("DONE", (System.currentTimeMillis() / 1000).toInt()), timeoutMs)
+            val reply = readExactly(stream, 8, timeoutMs)
+            val tag = String(reply, 0, 4, Charsets.US_ASCII)
+            if (tag == "FAIL") {
+                val len = ByteBuffer.wrap(reply, 4, 4).order(ByteOrder.LITTLE_ENDIAN).int
+                throw AdbException("Upload failed: " + readExactly(stream, len, timeoutMs).toString(Charsets.UTF_8), AdbException.Code.CLOSED)
+            }
+            if (tag != "OKAY") throw AdbException("Unexpected sync reply $tag", AdbException.Code.CLOSED)
+            runCatching { writeStream(id, stream, req("QUIT", 0), 5000) }
+        } finally {
+            if (!stream.closed) {
+                streams.remove(id)
+                runCatching { write(AdbProtocol.encode(AdbProtocol.CLSE, id, stream.remoteId)) }
+            }
+        }
     }
 
     override fun close() {
         isOpen = false
         runCatching { socket.close() }
-        for (s in streams.values) {
-            s.error = AdbException("Connection closed", AdbException.Code.CLOSED)
-            s.done.countDown()
-        }
+        for (s in streams.values) finish(s, AdbException("Connection closed", AdbException.Code.CLOSED))
         streams.clear()
     }
 }
@@ -306,6 +415,20 @@ object FireTvCommands {
         Regex("Display Power: state=(\\w+)").find(out)?.let { return it.groupValues[1] == "ON" }
         return null
     }
+
+    const val APPS =
+        "cmd package query-activities --brief -a android.intent.action.MAIN -c android.intent.category.LEANBACK_LAUNCHER ; " +
+            "cmd package query-activities --brief -a android.intent.action.MAIN -c android.intent.category.LAUNCHER"
+    private val HIDDEN = Regex("^(com\\.amazon\\.tv\\.launcher|com\\.google\\.android\\.tvlauncher|com\\.android\\.tv\\.settings)$")
+
+    fun packages(out: String): List<String> {
+        val pkgs = LinkedHashSet<String>()
+        Regex("(?:^|\\s)([a-zA-Z]\\w*(?:\\.\\w+)+)/[\\w.$]+", RegexOption.MULTILINE).findAll(out).forEach { pkgs += it.groupValues[1] }
+        Regex("^package:([\\w.]+)$", RegexOption.MULTILINE).findAll(out).forEach { pkgs += it.groupValues[1] }
+        return pkgs.toList()
+    }
+
+    fun visible(pkg: String) = !HIDDEN.matches(pkg)
 
     fun key(code: Int, direction: Direction): String? = when (direction) {
         Direction.END_LONG -> null // `--longpress` already includes the release
@@ -430,6 +553,52 @@ class FireTvClient(
     }
 
     override fun launchApp(url: String) = run(FireTvCommands.launch(url))
+
+    private fun live(): AdbConnection = conn?.takeIf { it.isOpen && state.connected }
+        ?: throw AdbException("Not connected to the Fire TV", AdbException.Code.CLOSED)
+
+    /** Installed launchable apps, sorted by name. Blocking. */
+    fun listApps(): List<TvApp> {
+        val c = live()
+        var pkgs = FireTvCommands.packages(c.shell(FireTvCommands.APPS, 15_000))
+        if (pkgs.isEmpty()) pkgs = FireTvCommands.packages(c.shell("pm list packages -3", 15_000))
+        return pkgs.filter(FireTvCommands::visible).map { TvApp(Apps.name(it), it) }.sortedBy { it.name.lowercase() }
+    }
+
+    /** PNG screenshot of the screen. Blocking. */
+    fun screenshot(): ByteArray {
+        val png = live().exec("screencap -p", 15_000)
+        val sig = byteArrayOf(0x89.toByte(), 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a)
+        if (png.size < 8 || !png.copyOfRange(0, 8).contentEquals(sig)) {
+            throw AdbException(png.toString(Charsets.UTF_8).trim().take(200).ifEmpty { "The TV did not return a screenshot" }, AdbException.Code.CLOSED)
+        }
+        return png
+    }
+
+    /**
+     * Uploads and installs an APK. Blocking. [onProgress] gets bytes uploaded
+     * (and -1 once the TV is installing). Returns pm's output.
+     */
+    fun installApk(apk: java.io.InputStream, onProgress: (Long) -> Unit = {}): String {
+        val c = live()
+        val input = java.io.BufferedInputStream(apk)
+        input.mark(4)
+        val magic = ByteArray(2)
+        if (input.read(magic) != 2 || magic[0] != 'P'.code.toByte() || magic[1] != 'K'.code.toByte()) {
+            throw IllegalArgumentException("That is not an APK file")
+        }
+        input.reset()
+        val remote = "/data/local/tmp/kalimote-${System.currentTimeMillis()}.apk"
+        try {
+            c.push(input, remote, onProgress = onProgress)
+            onProgress(-1)
+            val out = c.shell("pm install -r $remote", 180_000).trim()
+            if (!out.contains("Success")) throw AdbException(out.lines().lastOrNull() ?: "Install failed", AdbException.Code.CLOSED)
+            return out
+        } finally {
+            runCatching { c.shell("rm -f $remote") }
+        }
+    }
 
     companion object {
         /**

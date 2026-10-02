@@ -100,6 +100,22 @@ class JellyfinTest {
             assertTrue(after.paused)
             assertEquals(4, after.subtitles.single { it.selected }.index)
             assertTrue(client.image("item-42", "abc123").isNotEmpty())
+
+            // Library browsing and play-on-TV
+            assertEquals("user-1", client.userId(after))
+            assertEquals("user-1", client.userId(null))
+            val home = client.home("user-1")
+            assertEquals(listOf("Continue watching", "Latest", "Libraries"), home.map { it.title })
+            assertEquals(35.5, home[0].items[0].progress)
+            assertTrue(home[2].items.all { it.browsable })
+            assertEquals(listOf("Sintel"), client.search("user-1", "sintel")[0].items.map { it.name })
+            val series = home[1].items.first { it.type == "Series" }
+            assertEquals(listOf(1 to 1, 2 to 5), client.children("user-1", series)[0].items.map { it.season to it.episode })
+            assertEquals(null, Jellyfin.pickPlayback(client.sessions(), listOf("10.9.9.9")))
+            val tv = assertNotNull(client.sessionFor("127.0.0.1", strict = true))
+            client.play(tv, "movie-2")
+            expect(Regex("Playing\\?playCommand=PlayNow&itemIds=movie-2"))
+            assertEquals("Sintel", client.sessionFor("127.0.0.1")?.item?.name)
         } finally {
             process.destroy()
         }

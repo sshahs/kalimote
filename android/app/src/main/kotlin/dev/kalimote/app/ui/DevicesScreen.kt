@@ -73,6 +73,7 @@ class DeviceActions(
     val rescan: () -> Unit,
     val setVolumeKeys: (Boolean) -> Unit,
     val setKeepScreenOn: (Boolean) -> Unit,
+    val setMediaControls: (Boolean) -> Unit,
     val exportBackup: () -> String,
     val importBackup: (String) -> String,
     val toast: (String) -> Unit,
@@ -197,6 +198,8 @@ fun DevicesScreen(state: UiState, actions: DeviceActions, modifier: Modifier = M
             }
             Switch(checked = state.keepScreenOn, onCheckedChange = actions.setKeepScreenOn)
         }
+
+        MediaControlsCard(state.mediaControls, actions.setMediaControls)
 
         SectionTitle("Quick controls")
         QuickControlsCard(actions.toast)
@@ -438,5 +441,31 @@ private fun Card(
             horizontalArrangement = Arrangement.spacedBy(12.dp),
             content = content,
         )
+    }
+}
+
+/** Lock-screen media controls; asks for the notification permission on Android 13+. */
+@Composable
+private fun MediaControlsCard(on: Boolean, set: (Boolean) -> Unit) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val permission = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.RequestPermission(),
+    ) { set(true) }
+    val toggle = { want: Boolean ->
+        val needsPermission = want && android.os.Build.VERSION.SDK_INT >= 33 &&
+            context.checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) !=
+            android.content.pm.PackageManager.PERMISSION_GRANTED
+        if (needsPermission) permission.launch(android.Manifest.permission.POST_NOTIFICATIONS) else set(want)
+    }
+    Card(onClick = { toggle(!on) }) {
+        Column(Modifier.weight(1f)) {
+            Text("Lock-screen controls", fontWeight = FontWeight.SemiBold)
+            Text(
+                "A media notification for the TV, and the volume buttons control the TV even when the phone is locked",
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                fontSize = 13.sp,
+            )
+        }
+        Switch(checked = on, onCheckedChange = { toggle(it) })
     }
 }

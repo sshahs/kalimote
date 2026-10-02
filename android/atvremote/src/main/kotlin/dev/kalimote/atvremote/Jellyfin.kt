@@ -33,6 +33,7 @@ data class JellyfinItem(
 
 data class JellyfinSession(
     val sessionId: String,
+    val userId: String? = null,
     val client: String,
     val deviceName: String,
     val appVersion: String,
@@ -45,6 +46,23 @@ data class JellyfinSession(
     val subtitles: List<JellyfinTrack>,
     val subtitleIndex: Int,
 )
+
+/** A library entry for the browser: playable, or [browsable] (series, library, folder). */
+data class JellyfinLibraryItem(
+    val id: String,
+    val name: String,
+    val type: String,
+    val seriesName: String?,
+    val season: Int?,
+    val episode: Int?,
+    val year: Int?,
+    val runtimeMs: Long,
+    val imageTag: String?,
+    val progress: Double?,
+    val browsable: Boolean,
+)
+
+data class JellyfinSection(val title: String, val items: List<JellyfinLibraryItem>)
 
 sealed interface JellyfinAction {
     data object PlayPause : JellyfinAction
@@ -116,6 +134,7 @@ object Jellyfin {
         }
         return JellyfinSession(
             sessionId = s.optString("Id"),
+            userId = s.str("UserId"),
             client = s.optString("Client"),
             deviceName = s.optString("DeviceName"),
             appVersion = s.optString("ApplicationVersion"),
@@ -129,6 +148,30 @@ object Jellyfin {
             subtitleIndex = ps.int("SubtitleStreamIndex") ?: -1,
         )
     }
+
+    fun parseItem(i: JSONObject): JellyfinLibraryItem {
+        val type = i.optString("Type")
+        return JellyfinLibraryItem(
+            id = i.optString("Id"),
+            name = i.optString("Name"),
+            type = type,
+            seriesName = i.str("SeriesName"),
+            season = i.int("ParentIndexNumber"),
+            episode = i.int("IndexNumber"),
+            year = i.int("ProductionYear"),
+            runtimeMs = i.optLong("RunTimeTicks") / TICKS_PER_MS,
+            imageTag = i.optJSONObject("ImageTags")?.str("Primary"),
+            progress = i.optJSONObject("UserData")?.let { u -> if (u.has("PlayedPercentage") && !u.isNull("PlayedPercentage")) u.optDouble("PlayedPercentage") else null },
+            browsable = type in setOf("Series", "Season", "Folder", "CollectionFolder", "BoxSet", "UserView"),
+        )
+    }
+
+    fun parseItems(arr: JSONArray?): List<JellyfinLibraryItem> =
+        if (arr == null) emptyList() else (0 until arr.length()).map { parseItem(arr.getJSONObject(it)) }
+
+    /** Strict match for starting playback: only the TV's own session. */
+    fun pickPlayback(sessions: List<JellyfinSession>, tvIps: Collection<String>): JellyfinSession? =
+        sessions.firstOrNull { it.remoteIp in tvIps }
 
     /** Same IP and playing, then same IP, then a playing Android TV client, then anything playing. */
     fun pick(sessions: List<JellyfinSession>, tvIps: Collection<String>): JellyfinSession? {
@@ -189,11 +232,65 @@ class JellyfinClient(url: String, private val apiKey: String, private val versio
     fun sessions(): List<JellyfinSession> =
         Jellyfin.parseSessions(text(request("GET", "/Sessions?activeWithinSeconds=960")))
 
-    /** The session for a TV given its host name or IP. */
-    fun sessionFor(tvHost: String): JellyfinSession? {
+    private fun ipsFor(tvHost: String): Set<String> {
         val ips = mutableSetOf(tvHost)
         runCatching { InetAddress.getAllByName(tvHost).forEach { ips += it.hostAddress.orEmpty() } }
-        return Jellyfin.pick(sessions(), ips)
+        return ips
+    }
+
+    /** The session for a TV given its host name or IP; [strict] = the TV's own session only. */
+    fun sessionFor(tvHost: String, strict: Boolean = false): JellyfinSession? {
+        val ips = ipsFor(tvHost)
+        val sessions = sessions()
+        return if (strict) Jellyfin.pickPlayback(sessions, ips) else Jellyfin.pick(sessions, ips)
+    }
+
+    private fun get(path: String) = text(request("GET", path))
+    private fun enc(s: String) = URLEncoder.encode(s, "UTF-8")
+
+    /** The user to browse as: the TV session's user, else the first enabled user. */
+    fun userId(session: JellyfinSession?): String {
+        session?.userId?.let { return it }
+        val users = JSONArray(get("/Users"))
+        val list = (0 until users.length()).map { users.getJSONObject(it) }
+        val user = list.firstOrNull { it.optJSONObject("Policy")?.optBoolean("IsDisabled") != true } ?: list.firstOrNull()
+        return user?.optString("Id") ?: throw JellyfinException("No Jellyfin users found")
+    }
+
+    /** Continue watching, latest and libraries. */
+    fun home(userId: String): List<JellyfinSection> {
+        val u = enc(userId)
+        val resume = JSONObject(get("/Users/$u/Items/Resume?Limit=12&MediaTypes=Video"))
+        val latestRaw = get("/Users/$u/Items/Latest?Limit=16").trim()
+        val latest = if (latestRaw.startsWith("[")) JSONArray(latestRaw) else JSONObject(latestRaw).optJSONArray("Items")
+        val views = JSONObject(get("/Users/$u/Views"))
+        return listOf(
+            JellyfinSection("Continue watching", Jellyfin.parseItems(resume.optJSONArray("Items"))),
+            JellyfinSection("Latest", Jellyfin.parseItems(latest)),
+            JellyfinSection("Libraries", Jellyfin.parseItems(views.optJSONArray("Items")).map { it.copy(browsable = true) }),
+        ).filter { it.items.isNotEmpty() }
+    }
+
+    fun search(userId: String, query: String): List<JellyfinSection> {
+        val res = JSONObject(
+            get("/Users/${enc(userId)}/Items?searchTerm=${enc(query)}&Recursive=true&IncludeItemTypes=Movie,Series,Episode,Video,MusicVideo&Limit=40"),
+        )
+        return listOf(JellyfinSection("Results for \u201c$query\u201d", Jellyfin.parseItems(res.optJSONArray("Items"))))
+    }
+
+    /** Contents of a library/folder, or a series' episodes. */
+    fun children(userId: String, item: JellyfinLibraryItem): List<JellyfinSection> {
+        val res = if (item.type == "Series") {
+            JSONObject(get("/Shows/${enc(item.id)}/Episodes?userId=${enc(userId)}"))
+        } else {
+            JSONObject(get("/Users/${enc(userId)}/Items?ParentId=${enc(item.id)}&Recursive=true&IncludeItemTypes=Movie,Series,Video,MusicVideo&SortBy=SortName&Limit=200"))
+        }
+        return listOf(JellyfinSection(item.name, Jellyfin.parseItems(res.optJSONArray("Items"))))
+    }
+
+    /** Starts playing [itemId] on the session ("cast" it to the TV). */
+    fun play(session: JellyfinSession, itemId: String) {
+        request("POST", "/Sessions/${enc(session.sessionId)}/Playing?playCommand=PlayNow&itemIds=${enc(itemId)}").disconnect()
     }
 
     fun control(session: JellyfinSession, action: JellyfinAction) {

@@ -51,6 +51,19 @@ class FireTvTest {
     }
 
     @Test
+    fun appNames() {
+        assertEquals("Netflix", Apps.name("com.netflix.ninja"))
+        assertEquals("YouTube", Apps.name("com.amazon.firetv.youtube"))
+        assertEquals("Jellyfin (debug)", Apps.name("org.jellyfin.androidtv.debug"))
+        assertEquals("Coolapp", Apps.name("com.example.coolapp"))
+        assertEquals("VLC", Apps.name("org.videolan.vlc"))
+        assertEquals(
+            listOf("com.netflix.ninja", "org.xbmc.kodi", "com.x.y"),
+            FireTvCommands.packages("priority=0 match=0x1\n  com.netflix.ninja/.MainActivity\n  org.xbmc.kodi/org.xbmc.kodi.Splash\npackage:com.x.y"),
+        )
+    }
+
+    @Test
     fun commands() {
         val out = "  mCurrentFocus=Window{9f0 u0 org.jellyfin.androidtv.debug/org.jellyfin.androidtv.ui.MainActivity}\n mWakefulness=Asleep\n"
         assertEquals("org.jellyfin.androidtv.debug", FireTvCommands.currentApp(out))
@@ -134,6 +147,22 @@ class FireTvTest {
             expect(Regex("launch org.jellyfin.androidtv.debug"))
             client.await { it.currentApp == "org.jellyfin.androidtv.debug" }
             assertEquals(true, Jellyfin.detect(client.state.currentApp)?.debug)
+            // App list, screenshot and APK install
+            assertEquals(
+                listOf("Coolapp", "Jellyfin", "Jellyfin (debug)", "Netflix", "VLC", "YouTube"),
+                client.listApps().map { it.name },
+            )
+            val png = client.screenshot()
+            assertEquals("PNG", String(png, 1, 3))
+            assertFailsWith<IllegalArgumentException> { client.installApk("not an apk".byteInputStream()) }
+            val apk = byteArrayOf(0x50, 0x4b, 3, 4) + ByteArray(300 * 1024) { (it * 7).toByte() }
+            val progress = mutableListOf<Long>()
+            val out = client.installApk(apk.inputStream()) { progress += it }
+            assertTrue(out.contains("Success"))
+            expect(Regex("installed apk ${apk.size} bytes"))
+            assertTrue(progress.count { it > 0 } >= 5)
+            assertEquals(-1L, progress.last())
+
             client.sendKey(KeyCodes.POWER)
             client.await { it.powered == false }
             client.shutdown()

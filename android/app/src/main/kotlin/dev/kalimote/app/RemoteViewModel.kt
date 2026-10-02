@@ -21,6 +21,10 @@ import dev.kalimote.atvremote.FireTvClient
 import dev.kalimote.atvremote.TvClient
 import dev.kalimote.atvremote.RemoteState
 import dev.kalimote.atvremote.WakeOnLan
+import dev.kalimote.atvremote.Apps
+import dev.kalimote.atvremote.JellyfinLibraryItem
+import dev.kalimote.atvremote.JellyfinSection
+import dev.kalimote.atvremote.TvApp
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
@@ -41,6 +45,16 @@ data class PairingUi(
     enum class Phase { CONNECTING, ENTER_CODE, VERIFYING, APPROVE }
 }
 
+/** APK install progress on a Fire TV. */
+data class InstallUi(
+    val fileName: String,
+    val sent: Long = 0,
+    val total: Long = 0,
+    val installing: Boolean = false,
+    val done: Boolean = false,
+    val error: String? = null,
+)
+
 data class UiState(
     val devices: List<TvDevice> = emptyList(),
     val discovered: List<DiscoveredTv> = emptyList(),
@@ -60,6 +74,8 @@ data class UiState(
     val runningMacro: String? = null,
     val sleepAt: Long = 0,
     val message: String? = null,
+    val install: InstallUi? = null,
+    val mediaControls: Boolean = false,
 ) {
     val selected: TvDevice? get() = devices.firstOrNull { it.id == selectedId }
 
@@ -81,6 +97,7 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
             touchpad = store.touchpad,
             volumeKeys = store.volumeKeys,
             keepScreenOn = store.keepScreenOn,
+            mediaControls = store.mediaControls,
             jellyfinUrl = store.jellyfinUrl,
             jellyfinConfigured = store.jellyfinUrl.isNotBlank() && store.jellyfinKey.isNotBlank(),
             macros = store.loadMacros(),
@@ -178,6 +195,7 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
     private fun onRemoteState(deviceId: String, remote: RemoteState) {
         if (clientDeviceId != deviceId) return
         _state.update { it.copy(remote = remote) }
+        MediaControlsService.updateNowPlaying(_state.value.selected?.name, remote.currentApp, remote.powered)
         if (remote.connected) {
             pendingLink?.let { url ->
                 pendingLink = null
@@ -598,7 +616,114 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
         _state.update { it.copy(jellyfinUrl = "", jellyfinConfigured = false, jellyfinSession = null) }
     }
 
-    /** Poster bytes for the now-playing card (null if unavailable). */
+    /** Library sections: view "home", "search" ([query]) or "open" ([item]). Throws with a readable message. */
+    suspend fun jellyfinBrowse(view: String, query: String? = null, item: JellyfinLibraryItem? = null): List<JellyfinSection> {
+        val client = jellyfinClient() ?: throw IllegalStateException("Connect a Jellyfin server first")
+        val host = _state.value.selected?.host
+        return withContext(Dispatchers.IO) {
+            val session = host?.let { runCatching { client.sessionFor(it, strict = true) }.getOrNull() }
+            val user = client.userId(session)
+            when (view) {
+                "search" -> client.search(user, query.orEmpty().trim())
+                "open" -> client.children(user, item ?: error("Nothing to open"))
+                else -> client.home(user)
+            }
+        }
+    }
+
+    /** Plays an item on the TV, opening Jellyfin there first if it isn't running. */
+    fun jellyfinPlay(item: JellyfinLibraryItem, done: (String?) -> Unit = {}) {
+        val client = jellyfinClient() ?: return done("Connect a Jellyfin server first")
+        val host = _state.value.selected?.host ?: return done("No TV selected")
+        toast("Starting ${item.name}…")
+        viewModelScope.launch {
+            val error = withContext(Dispatchers.IO) {
+                runCatching {
+                    var session = client.sessionFor(host, strict = true)
+                    if (session == null) {
+                        val pkg = Jellyfin.detect(_state.value.remote.currentApp)?.pkg ?: "org.jellyfin.androidtv"
+                        withContext(Dispatchers.Main) { client()?.launchApp(Apps.launchUrl(pkg)) }
+                        val end = System.currentTimeMillis() + 25_000
+                        while (session == null && System.currentTimeMillis() < end) {
+                            Thread.sleep(1000)
+                            session = runCatching { client.sessionFor(host, strict = true) }.getOrNull()
+                        }
+                    }
+                    client.play(session ?: error("Jellyfin did not start on the TV (is it signed in?)"), item.id)
+                }.exceptionOrNull()?.message
+            }
+            if (error != null) toast(error) else toast("Playing ${item.name}")
+            done(error)
+            delay(800)
+            refreshJellyfin()
+        }
+    }
+
+    private fun client(): TvClient? = client
+
+    // ------------------------------------------------------------ apps, Fire TV tools
+
+    /** Installed apps (Fire TV) or the popular-apps catalog (Google TV). */
+    suspend fun listApps(): Pair<Boolean, List<TvApp>> {
+        val c = client
+        if (c is FireTvClient) return true to withContext(Dispatchers.IO) { c.listApps() }
+        return false to Apps.catalog
+    }
+
+    fun launchPackage(app: TvApp) {
+        if (isConnected) {
+            client?.launchApp(Apps.launchUrl(app.pkg))
+            toast("Opening ${app.name}…")
+        } else {
+            toast("TV is not connected")
+        }
+    }
+
+    suspend fun screenshot(): ByteArray {
+        val c = client as? FireTvClient ?: throw IllegalStateException("Screenshots need a Fire TV")
+        return withContext(Dispatchers.IO) { c.screenshot() }
+    }
+
+    fun installApk(uri: android.net.Uri) {
+        val c = client as? FireTvClient ?: return toast("APK install needs a Fire TV")
+        val app = getApplication<Application>()
+        var name = "app.apk"
+        var size = 0L
+        runCatching {
+            app.contentResolver.query(uri, null, null, null, null)?.use { cur ->
+                if (cur.moveToFirst()) {
+                    cur.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME).takeIf { it >= 0 }?.let { name = cur.getString(it) }
+                    cur.getColumnIndex(android.provider.OpenableColumns.SIZE).takeIf { it >= 0 }?.let { size = cur.getLong(it) }
+                }
+            }
+        }
+        _state.update { it.copy(install = InstallUi(name, total = size)) }
+        viewModelScope.launch {
+            val error = withContext(Dispatchers.IO) {
+                runCatching {
+                    val input = app.contentResolver.openInputStream(uri) ?: error("Cannot read $name")
+                    input.use {
+                        c.installApk(it) { sent ->
+                            _state.update { s ->
+                                s.copy(install = s.install?.let { i -> i.copy(sent = if (sent >= 0) sent else i.sent, installing = sent < 0) })
+                            }
+                        }
+                    }
+                }.exceptionOrNull()?.message
+            }
+            _state.update { s -> s.copy(install = s.install?.copy(installing = false, done = error == null, error = error)) }
+        }
+    }
+
+    fun dismissInstall() = _state.update { it.copy(install = null) }
+
+    fun setMediaControls(on: Boolean) {
+        store.mediaControls = on
+        _state.update { it.copy(mediaControls = on) }
+        MediaControlsService.apply(getApplication(), on)
+    }
+
+    /** Poster bytes for Jellyfin items (null if unavailable). */
     suspend fun jellyfinPoster(itemId: String, tag: String?): ByteArray? {
         val client = jellyfinClient() ?: return null
         return withContext(Dispatchers.IO) { runCatching { client.image(itemId, tag) }.getOrNull() }

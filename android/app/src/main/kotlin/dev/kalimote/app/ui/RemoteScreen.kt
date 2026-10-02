@@ -89,6 +89,8 @@ import dev.kalimote.app.UiState
 import dev.kalimote.atvremote.Direction
 import dev.kalimote.atvremote.KeyCodes
 import dev.kalimote.atvremote.RemoteState
+import dev.kalimote.atvremote.Apps as TvApps
+import dev.kalimote.atvremote.TvApp
 
 class RemoteActions(
     val key: (Int, Direction) -> Unit,
@@ -110,6 +112,10 @@ class RemoteActions(
     val stopMacro: () -> Unit,
     val toast: (String) -> Unit,
     val jellyfin: JellyfinActions,
+    val listApps: suspend () -> Pair<Boolean, List<TvApp>>,
+    val launchPackage: (TvApp) -> Unit,
+    val screenshot: suspend () -> ByteArray,
+    val installApk: (android.net.Uri) -> Unit,
 )
 
 @Composable
@@ -118,6 +124,8 @@ fun RemoteScreen(state: UiState, actions: RemoteActions, modifier: Modifier = Mo
     var showKeyboard by rememberSaveable { mutableStateOf(false) }
     var showMore by rememberSaveable { mutableStateOf(false) }
     var showAddApp by rememberSaveable { mutableStateOf(false) }
+    var showAppPicker by rememberSaveable { mutableStateOf(false) }
+    var showLibrary by rememberSaveable { mutableStateOf(false) }
     var showSleep by rememberSaveable { mutableStateOf(false) }
     var showVolume by rememberSaveable { mutableStateOf(false) }
     var editingMacro by remember { mutableStateOf<SavedMacro?>(null) }
@@ -221,11 +229,15 @@ fun RemoteScreen(state: UiState, actions: RemoteActions, modifier: Modifier = Mo
                 RemoteButton("Fast forward", m, icon = Icons.Filled.FastForward, shape = shape) { key(KeyCodes.MEDIA_FAST_FORWARD) }
             }
 
-            JellyfinPanel(state, actions.jellyfin)
+            JellyfinPanel(state, actions.jellyfin, onLibrary = { showLibrary = true })
 
             MoreButtons(expanded = showMore, onToggle = { showMore = !showMore }, key = key)
 
-            Apps(state, actions, onAdd = { showAddApp = true })
+            Apps(state, actions, onAdd = { showAppPicker = true }, onLibrary = { showLibrary = true })
+
+            if (connected && state.selected?.isFireTv == true) {
+                FireTvTools(screenshot = actions.screenshot, install = actions.installApk)
+            }
 
             OpenLinkRow(actions.openLink)
 
@@ -259,6 +271,32 @@ fun RemoteScreen(state: UiState, actions: RemoteActions, modifier: Modifier = Mo
     }
 
     if (showKeyboard) KeyboardDialog(onDismiss = { showKeyboard = false }, onText = actions.text, onKey = key)
+    if (showAppPicker) {
+        AppPickerDialog(
+            load = actions.listApps,
+            onOpen = actions.launchPackage,
+            onAdd = { app ->
+                actions.addApp(AppShortcut(app.name, TvApps.launchUrl(app.pkg)))
+                actions.toast("Added ${app.name}")
+            },
+            onCustom = {
+                showAppPicker = false
+                showAddApp = true
+            },
+            onDismiss = { showAppPicker = false },
+        )
+    }
+    if (showLibrary) {
+        JellyfinLibraryDialog(
+            browse = actions.jellyfin.browse,
+            play = { item ->
+                actions.jellyfin.play(item)
+                showLibrary = false
+            },
+            poster = actions.jellyfin.poster,
+            onDismiss = { showLibrary = false },
+        )
+    }
     if (showAddApp) {
         AddAppDialog(onDismiss = { showAddApp = false }) {
             actions.addApp(it)
@@ -370,7 +408,7 @@ private fun MoreButtons(expanded: Boolean, onToggle: () -> Unit, key: (Int) -> U
 
 @OptIn(ExperimentalLayoutApi::class, ExperimentalFoundationApi::class)
 @Composable
-private fun Apps(state: UiState, actions: RemoteActions, onAdd: () -> Unit) {
+private fun Apps(state: UiState, actions: RemoteActions, onAdd: () -> Unit, onLibrary: () -> Unit) {
     var removing by remember { mutableStateOf<AppShortcut?>(null) }
     Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -419,6 +457,16 @@ private fun Apps(state: UiState, actions: RemoteActions, onAdd: () -> Unit) {
                     }
                 }
                 repeat(3 - row.size) { Spacer(Modifier.weight(1f)) }
+            }
+        }
+        if (state.jellyfinConfigured && state.remote.connected) {
+            Box(
+                Modifier.fillMaxWidth().height(44.dp).clip(RoundedCornerShape(14.dp))
+                    .background(JellyfinPurple.copy(alpha = 0.18f))
+                    .combinedClickable(onClick = onLibrary),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text("Browse Jellyfin library", fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
             }
         }
     }

@@ -66,6 +66,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.kalimote.app.UiState
 import dev.kalimote.atvremote.JellyfinAction
+import dev.kalimote.atvremote.JellyfinLibraryItem
+import dev.kalimote.atvremote.JellyfinSection
 import dev.kalimote.atvremote.JellyfinSession
 import dev.kalimote.atvremote.JellyfinTrack
 import dev.kalimote.atvremote.KeyCodes
@@ -79,6 +81,8 @@ class JellyfinActions(
     val control: (JellyfinAction) -> Unit,
     val openSettings: () -> Unit,
     val poster: suspend (itemId: String, tag: String?) -> ByteArray?,
+    val browse: suspend (view: String, query: String?, item: JellyfinLibraryItem?) -> List<JellyfinSection>,
+    val play: (JellyfinLibraryItem) -> Unit,
 )
 
 @Composable
@@ -105,7 +109,7 @@ private fun fmt(ms: Long): String {
 /** Shown on the remote while Jellyfin (release or debug build) is in the TV's foreground. */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-fun JellyfinPanel(state: UiState, actions: JellyfinActions) {
+fun JellyfinPanel(state: UiState, actions: JellyfinActions, onLibrary: () -> Unit) {
     val app = state.jellyfinApp ?: return
     val shape = RoundedCornerShape(18.dp)
     Column(
@@ -135,6 +139,9 @@ fun JellyfinPanel(state: UiState, actions: JellyfinActions) {
                     color = Color(0xFF222222),
                     modifier = Modifier.clip(RoundedCornerShape(6.dp)).background(Warn).padding(horizontal = 6.dp, vertical = 2.dp),
                 )
+            }
+            if (state.jellyfinConfigured) {
+                TextButton(onClick = onLibrary) { Text("Library") }
             }
             IconButton(onClick = actions.openSettings, modifier = Modifier.size(34.dp)) {
                 Icon(Icons.Filled.Settings, "Jellyfin server settings", Modifier.size(18.dp))

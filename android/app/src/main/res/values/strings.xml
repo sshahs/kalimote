@@ -12,4 +12,8 @@
     <string name="shortcut_power_long">Turn TV on or off</string>
     <string name="shortcut_play_pause_long">Play or pause on TV</string>
     <string name="shortcut_run_macro">Run %1$s</string>
+    <string name="previous">Previous</string>
+    <string name="next">Next</string>
+    <string name="media_channel">TV media controls</string>
+    <string name="media_text">Volume keys control the TV</string>
 </resources>

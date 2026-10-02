@@ -111,6 +111,7 @@ fun KalimoteApp(vm: RemoteViewModel) {
                     rescan = vm::rescan,
                     setVolumeKeys = vm::setVolumeKeys,
                     setKeepScreenOn = vm::setKeepScreenOn,
+                    setMediaControls = vm::setMediaControls,
                     exportBackup = vm::exportBackup,
                     importBackup = vm::importBackup,
                     toast = vm::toast,
@@ -145,7 +146,13 @@ fun KalimoteApp(vm: RemoteViewModel) {
                         control = vm::jellyfinControl,
                         openSettings = { showJellyfinSettings = true },
                         poster = vm::jellyfinPoster,
+                        browse = { view, query, item -> vm.jellyfinBrowse(view, query, item) },
+                        play = { vm.jellyfinPlay(it) },
                     ),
+                    listApps = vm::listApps,
+                    launchPackage = vm::launchPackage,
+                    screenshot = vm::screenshot,
+                    installApk = vm::installApk,
                 ),
                 modifier,
             )
@@ -161,6 +168,8 @@ fun KalimoteApp(vm: RemoteViewModel) {
             onDismiss = { showJellyfinSettings = false },
         )
     }
+
+    state.install?.let { InstallDialog(it, onDismiss = vm::dismissInstall) }
 
     state.pairing?.let { pairing ->
         PairingDialog(

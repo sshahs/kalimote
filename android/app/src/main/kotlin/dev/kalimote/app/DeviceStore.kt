@@ -124,6 +124,11 @@ class DeviceStore(context: Context) {
         get() = prefs.getString("jellyfinKey", "") ?: ""
         set(value) = prefs.edit().putString("jellyfinKey", value).apply()
 
+    /** Media controls in the notification shade / lock screen. */
+    var mediaControls: Boolean
+        get() = prefs.getBoolean("mediaControls", false)
+        set(value) = prefs.edit().putBoolean("mediaControls", value).apply()
+
     var keepScreenOn: Boolean
         get() = prefs.getBoolean("keepScreenOn", false)
         set(value) = prefs.edit().putBoolean("keepScreenOn", value).apply()

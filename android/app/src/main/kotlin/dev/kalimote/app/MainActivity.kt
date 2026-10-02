@@ -22,7 +22,10 @@ class MainActivity : ComponentActivity() {
                 KalimoteApp(vm)
             }
         }
-        if (savedInstanceState == null) handleShare(intent)
+        if (savedInstanceState == null) {
+            handleShare(intent)
+            if (vm.state.value.mediaControls) MediaControlsService.apply(this, true)
+        }
     }
 
     override fun onNewIntent(intent: Intent) {
