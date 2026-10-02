@@ -147,3 +147,43 @@ test('Jellyfin server: configure, status, control, image proxy', async () => {
   await manager.setJellyfin({ url: '' });
   assert.equal(manager.list().jellyfin.configured, false);
 });
+
+test('Jellyfin library: browse home, search, open series, play on TV', async () => {
+  await manager.setJellyfin({ url: jf.url, apiKey: 'test-key' });
+  const home = await manager.jellyfinBrowse(deviceId, { view: 'home' });
+  assert.deepEqual(home.sections.map((s) => s.title), ['Continue watching', 'Latest', 'Libraries']);
+  assert.equal(home.sections[0].items[0].progress, 35.5);
+  assert.equal(home.sections[2].items[0].browsable, true);
+
+  const found = await manager.jellyfinBrowse(deviceId, { view: 'search', query: 'sintel' });
+  assert.deepEqual(found.sections[0].items.map((i) => i.name), ['Sintel']);
+  await assert.rejects(manager.jellyfinBrowse(deviceId, { view: 'search', query: ' ' }), /Type something/);
+
+  const series = home.sections[1].items.find((i) => i.type === 'Series');
+  assert.equal(series.browsable, true);
+  const eps = await manager.jellyfinBrowse(deviceId, { view: 'open', item: series });
+  assert.deepEqual(eps.sections[0].items.map((i) => `S${i.season}E${i.episode}`), ['S1E1', 'S2E5']);
+
+  const movies = await manager.jellyfinBrowse(deviceId, { view: 'open', item: { id: 'lib-movies', type: 'CollectionFolder', name: 'Movies' } });
+  assert.equal(movies.sections[0].items.length, 3);
+
+  await manager.jellyfinPlay(deviceId, 'movie-2');
+  assert.equal(jf.commands.at(-1).path, '/Sessions/tv-session/Playing?playCommand=PlayNow&itemIds=movie-2');
+  const st = await manager.jellyfinStatus(deviceId);
+  assert.equal(st.session.item.name, 'Sintel');
+});
+
+test('Jellyfin play opens the app on the TV when no session exists yet', async () => {
+  // Hide the TV session until the app is "launched" on the mock TV.
+  const tvSession = jf.sessions.find((s) => s.Id === 'tv-session');
+  jf.sessions = jf.sessions.filter((s) => s !== tvSession);
+  const launched = new Promise((resolve) =>
+    tv.once('link', (url) => {
+      jf.sessions.push(tvSession);
+      resolve(url);
+    }),
+  );
+  await manager.jellyfinPlay(deviceId, 'movie-3', { waitMs: 5000 });
+  assert.match(await launched, /^market:\/\/launch\?id=org\.jellyfin\.androidtv/);
+  assert.match(jf.commands.at(-1).path, /itemIds=movie-3$/);
+});

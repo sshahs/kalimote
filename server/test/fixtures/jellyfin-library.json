@@ -1,0 +1,98 @@
+{
+  "views": [
+    {
+      "Id": "lib-movies",
+      "Name": "Movies",
+      "CollectionType": "movies",
+      "Type": "CollectionFolder"
+    },
+    {
+      "Id": "lib-shows",
+      "Name": "Shows",
+      "CollectionType": "tvshows",
+      "Type": "CollectionFolder"
+    }
+  ],
+  "items": [
+    {
+      "Id": "movie-1",
+      "Name": "Big Buck Bunny",
+      "Type": "Movie",
+      "ProductionYear": 2008,
+      "RunTimeTicks": 5960000000,
+      "ParentId": "lib-movies",
+      "ImageTags": {
+        "Primary": "bbb"
+      },
+      "UserData": {
+        "PlayedPercentage": 35.5
+      },
+      "Resume": true
+    },
+    {
+      "Id": "movie-2",
+      "Name": "Sintel",
+      "Type": "Movie",
+      "ProductionYear": 2010,
+      "RunTimeTicks": 8880000000,
+      "ParentId": "lib-movies",
+      "ImageTags": {
+        "Primary": "sin"
+      },
+      "Latest": true
+    },
+    {
+      "Id": "movie-3",
+      "Name": "Tears of Steel",
+      "Type": "Movie",
+      "ProductionYear": 2012,
+      "RunTimeTicks": 7340000000,
+      "ParentId": "lib-movies",
+      "ImageTags": {
+        "Primary": "tos"
+      },
+      "Latest": true
+    },
+    {
+      "Id": "series-1",
+      "Name": "Kalimote Stories",
+      "Type": "Series",
+      "ProductionYear": 2026,
+      "ParentId": "lib-shows",
+      "ImageTags": {
+        "Primary": "ks"
+      },
+      "Latest": true
+    },
+    {
+      "Id": "ep-1",
+      "Name": "Pilot",
+      "Type": "Episode",
+      "SeriesId": "series-1",
+      "SeriesName": "Kalimote Stories",
+      "ParentIndexNumber": 1,
+      "IndexNumber": 1,
+      "RunTimeTicks": 26000000000,
+      "ImageTags": {
+        "Primary": "e1"
+      }
+    },
+    {
+      "Id": "ep-2",
+      "Name": "The One Where It Works",
+      "Type": "Episode",
+      "SeriesId": "series-1",
+      "SeriesName": "Kalimote Stories",
+      "ParentIndexNumber": 2,
+      "IndexNumber": 5,
+      "RunTimeTicks": 26000000000,
+      "ImageTags": {
+        "Primary": "e2"
+      },
+      "UserData": {
+        "PlayedPercentage": 23
+      },
+      "Resume": true
+    }
+  ]
+}

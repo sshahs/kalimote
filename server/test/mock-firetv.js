@@ -7,6 +7,7 @@
 
 import net from 'node:net';
 import crypto from 'node:crypto';
+import zlib from 'node:zlib';
 import { EventEmitter } from 'node:events';
 import { fileURLToPath } from 'node:url';
 import {
@@ -24,6 +25,60 @@ import {
 
 const LAUNCHER = 'com.amazon.tv.launcher';
 
+const CRC_TABLE = Array.from({ length: 256 }, (_, n) => {
+  let c = n;
+  for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
+  return c >>> 0;
+});
+const crc32 = (buf) => {
+  let c = 0xffffffff;
+  for (const b of buf) c = CRC_TABLE[(c ^ b) & 0xff] ^ (c >>> 8);
+  return (c ^ 0xffffffff) >>> 0;
+};
+
+/** A small PNG of a "TV screen" (gradient + app colour bar), so screenshots look plausible. */
+export function screenPng(seed = 0, width = 320, height = 180) {
+  const rows = [];
+  for (let y = 0; y < height; y++) {
+    const row = Buffer.alloc(1 + width * 3);
+    for (let x = 0; x < width; x++) {
+      const bar = y > height * 0.72 && y < height * 0.9 && x > width * 0.08 && x < width * 0.92;
+      row[1 + x * 3] = bar ? 255 : Math.round(20 + (x / width) * 60 + (seed * 37) % 80);
+      row[2 + x * 3] = bar ? 153 : Math.round(25 + (y / height) * 40);
+      row[3 + x * 3] = bar ? 0 : Math.round(60 + (x / width) * 120);
+    }
+    rows.push(row);
+  }
+  const chunk = (type, data) => {
+    const len = Buffer.alloc(4);
+    len.writeUInt32BE(data.length);
+    const td = Buffer.concat([Buffer.from(type), data]);
+    const crc = Buffer.alloc(4);
+    crc.writeUInt32BE(crc32(td));
+    return Buffer.concat([len, td, crc]);
+  };
+  const ihdr = Buffer.alloc(13);
+  ihdr.writeUInt32BE(width, 0);
+  ihdr.writeUInt32BE(height, 4);
+  ihdr[8] = 8; // bit depth
+  ihdr[9] = 2; // RGB
+  return Buffer.concat([
+    Buffer.from('89504e470d0a1a0a', 'hex'),
+    chunk('IHDR', ihdr),
+    chunk('IDAT', zlib.deflateSync(Buffer.concat(rows))),
+    chunk('IEND', Buffer.alloc(0)),
+  ]);
+}
+
+const INSTALLED = [
+  'com.netflix.ninja',
+  'com.amazon.firetv.youtube',
+  'org.jellyfin.androidtv',
+  'org.jellyfin.androidtv.debug',
+  'org.videolan.vlc',
+  'com.example.coolapp',
+];
+
 export class MockFireTv extends EventEmitter {
   constructor({ autoApprove = true } = {}) {
     super();
@@ -35,6 +90,9 @@ export class MockFireTv extends EventEmitter {
     this.awake = true;
     this.currentApp = LAUNCHER;
     this.pending = [];
+    this.installed = [...INSTALLED];
+    this.files = new Map(); // path -> Buffer (pushed with sync)
+    this.screenshots = 0;
     this.sockets = new Set();
     this.server = net.createServer((s) => this.onConnection(s));
   }
@@ -79,6 +137,7 @@ export class MockFireTv extends EventEmitter {
     const send = (...args) => !socket.destroyed && socket.write(encodeMessage(...args));
     let token = null;
     let authed = false;
+    const syncStreams = new Map();
     let nextLocal = 1000;
     const newToken = () => {
       token = crypto.randomBytes(20);
@@ -123,13 +182,55 @@ export class MockFireTv extends EventEmitter {
           const service = m.data.toString('utf8').replace(/\0+$/, '');
           const local = nextLocal++;
           send(CMD.OKAY, local, m.arg0);
-          const output = service.startsWith('shell:') ? this.shell(service.slice(6)) : '';
-          if (output) send(CMD.WRTE, local, m.arg0, output);
+          if (service === 'sync:') {
+            syncStreams.set(local, { remote: m.arg0, buf: Buffer.alloc(0), file: null });
+            continue;
+          }
+          let output = '';
+          if (service.startsWith('shell:')) output = this.shell(service.slice(6));
+          else if (service.startsWith('exec:')) output = this.exec(service.slice(5));
+          if (output.length) send(CMD.WRTE, local, m.arg0, output);
           send(CMD.CLSE, local, m.arg0);
+        } else if (m.command === CMD.WRTE && syncStreams.has(m.arg1)) {
+          const st = syncStreams.get(m.arg1);
+          send(CMD.OKAY, m.arg1, m.arg0);
+          st.buf = Buffer.concat([st.buf, m.data]);
+          this.sync(st, (data) => send(CMD.WRTE, m.arg1, st.remote, data), () => {
+            syncStreams.delete(m.arg1);
+            send(CMD.CLSE, m.arg1, st.remote);
+          });
         }
         // OKAY / CLSE from the client need no action here.
       }
     });
+  }
+
+  /** Handles buffered ADB sync requests (SEND / DATA / DONE / QUIT). */
+  sync(st, reply, close) {
+    for (;;) {
+      if (st.buf.length < 8) return;
+      const id = st.buf.toString('ascii', 0, 4);
+      const len = st.buf.readUInt32LE(4);
+      if (id === 'DONE' || id === 'QUIT') {
+        st.buf = st.buf.subarray(8);
+        if (id === 'QUIT') return close();
+        this.files.set(st.file.path, Buffer.concat(st.file.chunks));
+        this.emit('pushed', st.file.path);
+        reply(Buffer.from('OKAY\0\0\0\0', 'binary'));
+        continue;
+      }
+      if (st.buf.length < 8 + len) return;
+      const payload = st.buf.subarray(8, 8 + len);
+      st.buf = st.buf.subarray(8 + len);
+      if (id === 'SEND') st.file = { path: payload.toString().split(',')[0], chunks: [] };
+      else if (id === 'DATA') st.file.chunks.push(Buffer.from(payload));
+    }
+  }
+
+  exec(cmd) {
+    this.commands.push(`exec:${cmd}`);
+    if (cmd === 'screencap -p') return screenPng(this.screenshots++);
+    return this.shell(cmd);
   }
 
   shell(cmd) {
@@ -163,6 +264,21 @@ export class MockFireTv extends EventEmitter {
       this.emit('launch', this.currentApp);
       return 'Starting: Intent { act=android.intent.action.VIEW }\n';
     }
+    if (/^cmd package query-activities/.test(cmd)) {
+      // Real output lists "package/activity" lines under each match.
+      return this.installed.map((p) => `priority=0 preferredOrder=0 match=0x108000 specificIndex=-1 isDefault=false\n  ${p}/.MainActivity\n`).join('');
+    }
+    if (cmd === 'pm list packages -3') return this.installed.map((p) => `package:${p}`).join('\n');
+    if ((m = /^pm install -r (\S+)$/.exec(cmd))) {
+      const apk = this.files.get(m[1]);
+      if (!apk) return 'Failure [INSTALL_FAILED_INVALID_URI]\n';
+      this.emit('installed', apk);
+      return 'Performing Streamed Install\nSuccess\n';
+    }
+    if ((m = /^rm -f (\S+)$/.exec(cmd))) {
+      this.files.delete(m[1]);
+      return '';
+    }
     if ((m = /^monkey -p ([\w.]+)/.exec(cmd))) {
       this.currentApp = m[1];
       this.emit('launch', this.currentApp);
@@ -188,4 +304,5 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   tv.on('key', (k) => console.log(`key ${k.code}${k.long ? ' long' : ''}`));
   tv.on('text', (t) => console.log(`text "${t}"`));
   tv.on('launch', (a) => console.log(`launch ${a}`));
+  tv.on('installed', (apk) => console.log(`installed apk ${apk.length} bytes`));
 }

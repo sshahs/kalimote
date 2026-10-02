@@ -9,6 +9,7 @@ import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
 const FIXTURE = fileURLToPath(new URL('./fixtures/jellyfin-sessions.json', import.meta.url));
+const LIBRARY = fileURLToPath(new URL('./fixtures/jellyfin-library.json', import.meta.url));
 // 1x1 PNG
 const PNG = Buffer.from(
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==',
@@ -25,6 +26,7 @@ export class MockJellyfin {
   constructor({ apiKey = 'test-key' } = {}) {
     this.apiKey = apiKey;
     this.sessions = JSON.parse(fs.readFileSync(FIXTURE, 'utf8'));
+    this.library = JSON.parse(fs.readFileSync(LIBRARY, 'utf8'));
     this.commands = [];
     this.server = http.createServer((req, res) => this.handle(req, res));
   }
@@ -59,11 +61,48 @@ export class MockJellyfin {
       return json(200, { ServerName: 'Mock Jellyfin', Version: '10.10.3' });
     }
     if (req.method === 'GET' && url.pathname === '/Sessions') return json(200, this.sessions);
+
+    // Library browsing (enough of the API for Kalimote's browser)
+    const items = this.library.items;
+    const pub = (list) => list.map(({ Resume, Latest, ...i }) => i);
+    if (req.method === 'GET' && url.pathname === '/Users') return json(200, [{ Id: 'user-1', Name: 'sunny' }]);
+    let u;
+    if (req.method === 'GET' && (u = /^\/Users\/([^/]+)\/(Views|Items\/Resume|Items\/Latest|Items)$/.exec(url.pathname))) {
+      if (u[1] !== 'user-1') return json(404, { error: 'no user' });
+      if (u[2] === 'Views') return json(200, { Items: this.library.views });
+      if (u[2] === 'Items/Resume') return json(200, { Items: pub(items.filter((i) => i.Resume)) });
+      if (u[2] === 'Items/Latest') return json(200, pub(items.filter((i) => i.Latest)));
+      const q = (url.searchParams.get('searchTerm') ?? url.searchParams.get('SearchTerm') ?? '').toLowerCase();
+      const parent = url.searchParams.get('ParentId') ?? url.searchParams.get('parentId');
+      const types = (url.searchParams.get('IncludeItemTypes') ?? '').split(',').filter(Boolean);
+      const found = items.filter(
+        (i) => (!q || i.Name.toLowerCase().includes(q)) && (!parent || i.ParentId === parent) && (!types.length || types.includes(i.Type)),
+      );
+      return json(200, { Items: pub(found), TotalRecordCount: found.length });
+    }
+    if (req.method === 'GET' && (u = /^\/Shows\/([^/]+)\/Episodes$/.exec(url.pathname))) {
+      return json(200, { Items: pub(items.filter((i) => i.SeriesId === u[1])) });
+    }
     const img = /^\/Items\/([^/]+)\/Images\/Primary$/.exec(url.pathname);
     if (req.method === 'GET' && img) {
       // A poster-like gradient so screenshots look real; ?format=png for a raster image.
       if (url.searchParams.get('format') === 'png') return res.writeHead(200, { 'content-type': 'image/png' }).end(PNG);
       return res.writeHead(200, { 'content-type': 'image/svg+xml' }).end(POSTER);
+    }
+
+    const play = /^\/Sessions\/([^/]+)\/Playing$/.exec(url.pathname);
+    if (req.method === 'POST' && play) {
+      const s = this.session(decodeURIComponent(play[1]));
+      if (!s) return json(404, { error: 'no session' });
+      const item = this.library.items.find((i) => i.Id === url.searchParams.get('itemIds'));
+      this.commands.push({ session: s.Id, path: url.pathname + url.search, body });
+      console.log(`command ${url.pathname + url.search} null`);
+      if (item && url.searchParams.get('playCommand') === 'PlayNow') {
+        const { Resume, Latest, ...pubItem } = item;
+        s.NowPlayingItem = { ...pubItem, MediaStreams: [] };
+        s.PlayState = { PositionTicks: 0, IsPaused: false };
+      }
+      return res.writeHead(204).end();
     }
 
     const m = /^\/Sessions\/([^/]+)\/(Playing\/(\w+)|Command)$/.exec(url.pathname);

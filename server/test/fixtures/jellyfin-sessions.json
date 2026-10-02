@@ -7,7 +7,12 @@
     "ApplicationVersion": "10.10.3",
     "RemoteEndPoint": "192.168.1.77",
     "SupportsRemoteControl": true,
-    "PlayState": { "PositionTicks": 0, "IsPaused": false, "IsMuted": false }
+    "PlayState": {
+      "PositionTicks": 0,
+      "IsPaused": false,
+      "IsMuted": false
+    },
+    "UserId": "user-1"
   },
   {
     "Id": "tv-session",
@@ -26,13 +31,39 @@
       "Type": "Episode",
       "ProductionYear": 2026,
       "RunTimeTicks": 26000000000,
-      "ImageTags": { "Primary": "abc123" },
+      "ImageTags": {
+        "Primary": "abc123"
+      },
       "MediaStreams": [
-        { "Index": 0, "Type": "Video", "DisplayTitle": "1080p H264" },
-        { "Index": 1, "Type": "Audio", "DisplayTitle": "English - AAC - Stereo", "Language": "eng" },
-        { "Index": 2, "Type": "Audio", "DisplayTitle": "Japanese - AAC - Stereo", "Language": "jpn" },
-        { "Index": 3, "Type": "Subtitle", "DisplayTitle": "English - SRT", "Language": "eng" },
-        { "Index": 4, "Type": "Subtitle", "DisplayTitle": "Spanish - SRT", "Language": "spa" }
+        {
+          "Index": 0,
+          "Type": "Video",
+          "DisplayTitle": "1080p H264"
+        },
+        {
+          "Index": 1,
+          "Type": "Audio",
+          "DisplayTitle": "English - AAC - Stereo",
+          "Language": "eng"
+        },
+        {
+          "Index": 2,
+          "Type": "Audio",
+          "DisplayTitle": "Japanese - AAC - Stereo",
+          "Language": "jpn"
+        },
+        {
+          "Index": 3,
+          "Type": "Subtitle",
+          "DisplayTitle": "English - SRT",
+          "Language": "eng"
+        },
+        {
+          "Index": 4,
+          "Type": "Subtitle",
+          "DisplayTitle": "Spanish - SRT",
+          "Language": "spa"
+        }
       ]
     },
     "PlayState": {
@@ -41,6 +72,7 @@
       "IsMuted": false,
       "AudioStreamIndex": 1,
       "SubtitleStreamIndex": -1
-    }
+    },
+    "UserId": "user-1"
   }
 ]

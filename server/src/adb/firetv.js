@@ -1,6 +1,7 @@
 import { EventEmitter } from 'node:events';
 import { AdbClient, AdbError, ADB_PORT } from './client.js';
 import { resolveKey } from '../protocol/keycodes.js';
+import { appName } from '../apps.js';
 
 const POLL_MS = 3000;
 // One round trip: foreground window + power state.
@@ -35,6 +36,19 @@ export function launchCommand(url) {
   if (pkg) return `monkey -p ${pkg} -c android.intent.category.LAUNCHER 1 || monkey -p ${pkg} 1`;
   return `am start -a android.intent.action.VIEW -d ${shQuote(url)}`;
 }
+
+/** Lists launchable apps (TV and phone launcher categories) from `cmd package query-activities` output. */
+export function parsePackages(out) {
+  const pkgs = new Set();
+  for (const m of out.matchAll(/(?:^|\s)([a-zA-Z][\w]*(?:\.[\w]+)+)\/[\w.$]+/gm)) pkgs.add(m[1]);
+  for (const m of out.matchAll(/^package:([\w.]+)$/gm)) pkgs.add(m[1]);
+  return [...pkgs];
+}
+
+const APPS_CMD =
+  'cmd package query-activities --brief -a android.intent.action.MAIN -c android.intent.category.LEANBACK_LAUNCHER ; ' +
+  'cmd package query-activities --brief -a android.intent.action.MAIN -c android.intent.category.LAUNCHER';
+const HIDDEN_APPS = /^(com\.amazon\.tv\.launcher|com\.google\.android\.tvlauncher|com\.android\.tv\.settings)$/;
 
 /**
  * Fire TV (or any Android device with network ADB) behind the same interface
@@ -156,6 +170,47 @@ export class FireTvConnection extends EventEmitter {
   launchApp(url) {
     if (!url) throw new Error('App link is required');
     this.run(launchCommand(String(url)));
+  }
+
+  ensureLive() {
+    if (!this.state.connected || !this.client) throw new Error('Not connected to TV');
+    return this.client;
+  }
+
+  /** Installed launchable apps, sorted by name: [{ name, package }]. */
+  async listApps() {
+    const client = this.ensureLive();
+    let pkgs = parsePackages(await client.shell(APPS_CMD, { timeoutMs: 15000 }));
+    if (!pkgs.length) pkgs = parsePackages(await client.shell('pm list packages -3', { timeoutMs: 15000 }));
+    return pkgs
+      .filter((p) => !HIDDEN_APPS.test(p))
+      .map((p) => ({ name: appName(p), package: p }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }
+
+  /** PNG screenshot of what the TV is showing. */
+  async screenshot() {
+    const png = await this.ensureLive().exec('screencap -p', { timeoutMs: 15000 });
+    if (png.subarray(0, 8).toString('hex') !== '89504e470d0a1a0a') {
+      throw new Error(png.toString('utf8').trim().slice(0, 200) || 'The TV did not return a screenshot');
+    }
+    return png;
+  }
+
+  /** Uploads and installs an APK. onProgress(phase, sent, total). */
+  async installApk(apk, { onProgress = () => {} } = {}) {
+    const client = this.ensureLive();
+    if (!apk?.length || apk.subarray(0, 2).toString() !== 'PK') throw new Error('That is not an APK file');
+    const remote = `/data/local/tmp/kalimote-${Date.now()}.apk`;
+    await client.push(apk, remote, { onProgress: (sent, total) => onProgress('upload', sent, total) });
+    onProgress('install', apk.length, apk.length);
+    try {
+      const out = (await client.shell(`pm install -r ${remote}`, { timeoutMs: 180000 })).trim();
+      if (!/Success/.test(out)) throw new Error(out.split('\n').pop() || 'Install failed');
+      return out;
+    } finally {
+      client.shell(`rm -f ${remote}`).catch(() => {});
+    }
   }
 }
 

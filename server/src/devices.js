@@ -9,6 +9,7 @@ import { parseMacro, runMacro } from './macros.js';
 import { wake, lookupMac, normalizeMac } from './wol.js';
 import { JellyfinClient, detectJellyfin } from './jellyfin.js';
 import { FireTvConnection } from './adb/firetv.js';
+import { CATALOG } from './apps.js';
 import { ADB_PORT } from './adb/client.js';
 
 export const DEVICE_TYPES = ['androidtv', 'firetv'];
@@ -255,6 +256,12 @@ export class DeviceManager extends EventEmitter {
               deviceInfo: { model: this.clientName, vendor: 'Kalimote' },
             });
       conn.on('state', (st) => {
+        // Remember which Jellyfin build the TV runs (release or debug), for "play on TV".
+        const jf = detectJellyfin(st.currentApp);
+        if (jf && d.jellyfinPackage !== jf.package) {
+          d.jellyfinPackage = jf.package;
+          this.save();
+        }
         // Remember the TV's MAC address for Wake-on-LAN once we have talked to it.
         if (st.connected && !d.mac) {
           const mac = lookupMac(d.host);
@@ -451,6 +458,32 @@ export class DeviceManager extends EventEmitter {
     this.changed();
   }
 
+  // ---------------------------------------------------------------- apps, screenshot, install
+
+  /**
+   * Apps for the picker. Fire TV reports what is installed; the Google TV
+   * protocol can't, so a catalog of popular apps is offered instead.
+   */
+  async listApps(id) {
+    const d = this.get(id);
+    if (d.type === 'firetv') return { installed: true, apps: await this.live(d.id).listApps() };
+    return { installed: false, apps: CATALOG.map((a) => ({ name: a.name, package: a.packages[0] })) };
+  }
+
+  fireTv(id) {
+    const d = this.get(id);
+    if (d.type !== 'firetv') throw new Error('Only available on Fire TV (ADB)');
+    return this.live(d.id);
+  }
+
+  screenshot(id) {
+    return this.fireTv(id).screenshot();
+  }
+
+  installApk(id, apk, onProgress) {
+    return this.fireTv(id).installApk(apk, { onProgress });
+  }
+
   // ---------------------------------------------------------------- Jellyfin
 
   jellyfinClient() {
@@ -481,6 +514,47 @@ export class DeviceManager extends EventEmitter {
     if (!this.jellyfin?.apiKey) return { configured: false, app, session: null };
     const session = await this.jellyfinClient().sessionFor(d.host);
     return { configured: true, app, session };
+  }
+
+  /**
+   * Browses the Jellyfin library. view: 'home' | 'search' (query) | 'open'
+   * (item = { id, type, name }). Returns { sections: [{ title, items }] }.
+   */
+  async jellyfinBrowse(id, { view = 'home', query, item } = {}) {
+    const d = this.get(id);
+    const client = this.jellyfinClient();
+    const session = await client.sessionFor(d.host, { strict: true }).catch(() => null);
+    const userId = await client.userId(session);
+    if (view === 'search') {
+      if (!String(query ?? '').trim()) throw new Error('Type something to search for');
+      return { sections: await client.search(userId, String(query).trim()) };
+    }
+    if (view === 'open') {
+      if (!item?.id) throw new Error('Nothing to open');
+      return { sections: await client.children(userId, item) };
+    }
+    return { sections: await client.home(userId) };
+  }
+
+  /**
+   * Plays an item on the TV. If Jellyfin isn't running there yet, opens it
+   * and waits for its session to appear first.
+   */
+  async jellyfinPlay(id, itemId, { waitMs = 25000 } = {}) {
+    const d = this.get(id);
+    const client = this.jellyfinClient();
+    let session = await client.sessionFor(d.host, { strict: true });
+    if (!session) {
+      const conn = this.live(d.id);
+      conn.launchApp(`market://launch?id=${d.jellyfinPackage ?? 'org.jellyfin.androidtv'}`);
+      const end = Date.now() + waitMs;
+      while (!session && Date.now() < end) {
+        await sleep(1000);
+        session = await client.sessionFor(d.host, { strict: true }).catch(() => null);
+      }
+      if (!session) throw new Error('Jellyfin did not start on the TV (is it signed in?)');
+    }
+    await client.play(session, itemId);
   }
 
   async jellyfinControl(id, action, value) {

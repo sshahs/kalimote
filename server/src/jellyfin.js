@@ -41,6 +41,7 @@ export function normalizeSession(s) {
       }));
   return {
     sessionId: s.Id,
+    userId: s.UserId ?? null,
     client: s.Client,
     deviceName: s.DeviceName,
     appVersion: s.ApplicationVersion,
@@ -66,6 +67,33 @@ export function normalizeSession(s) {
     subtitles: track('Subtitle', ps.SubtitleStreamIndex),
     subtitleIndex: ps.SubtitleStreamIndex ?? -1,
   };
+}
+
+/** Converts a library item for the browser UI. */
+export function normalizeItem(i) {
+  return {
+    id: i.Id,
+    name: i.Name,
+    type: i.Type,
+    seriesName: i.SeriesName ?? null,
+    season: i.ParentIndexNumber ?? null,
+    episode: i.IndexNumber ?? null,
+    year: i.ProductionYear ?? null,
+    runtimeMs: Math.round((i.RunTimeTicks ?? 0) / TICKS_PER_MS),
+    imageTag: i.ImageTags?.Primary ?? null,
+    progress: i.UserData?.PlayedPercentage ?? null,
+    // Folders and series open a listing; everything else plays.
+    browsable: ['Series', 'Season', 'Folder', 'CollectionFolder', 'BoxSet', 'UserView'].includes(i.Type),
+  };
+}
+
+/** Strict match for starting playback: the TV's own session only. */
+export function pickPlaybackSession(sessions, tvIps) {
+  return (
+    sessions.find((s) => tvIps.includes(s.remoteIp) && s.supportsRemoteControl) ??
+    sessions.find((s) => tvIps.includes(s.remoteIp)) ??
+    null
+  );
 }
 
 /**
@@ -129,15 +157,83 @@ export class JellyfinClient {
     return (await res.json()).map(normalizeSession);
   }
 
-  /** Finds the session for a TV given its host name or IP. */
-  async sessionFor(tvHost) {
+  async ipsFor(tvHost) {
     const ips = [tvHost];
     try {
       ips.push(...(await dns.lookup(tvHost, { all: true })).map((a) => a.address));
     } catch {
       /* unresolvable: rely on the other heuristics */
     }
-    return pickSession(await this.sessions(), ips);
+    return ips;
+  }
+
+  /** Finds the session for a TV given its host name or IP. */
+  async sessionFor(tvHost, { strict = false } = {}) {
+    const ips = await this.ipsFor(tvHost);
+    const sessions = await this.sessions();
+    return strict ? pickPlaybackSession(sessions, ips) : pickSession(sessions, ips);
+  }
+
+  async json(path) {
+    return (await this.request('GET', path)).json();
+  }
+
+  /** The user to browse as: the TV session's user, else the first user. */
+  async userId(session) {
+    if (session?.userId) return session.userId;
+    const users = await this.json('/Users');
+    const user = users.find((u) => !u.Policy?.IsDisabled) ?? users[0];
+    if (!user) throw new Error('No Jellyfin users found');
+    return user.Id;
+  }
+
+  /** Continue watching, latest additions and libraries. */
+  async home(userId) {
+    const u = encodeURIComponent(userId);
+    const [resume, latest, views] = await Promise.all([
+      this.json(`/Users/${u}/Items/Resume?Limit=12&MediaTypes=Video&Fields=Overview`),
+      this.json(`/Users/${u}/Items/Latest?Limit=16&Fields=Overview`),
+      this.json(`/Users/${u}/Views`),
+    ]);
+    return [
+      { title: 'Continue watching', items: (resume.Items ?? []).map(normalizeItem) },
+      { title: 'Latest', items: (Array.isArray(latest) ? latest : latest.Items ?? []).map(normalizeItem) },
+      { title: 'Libraries', items: (views.Items ?? []).map((v) => ({ ...normalizeItem(v), browsable: true })) },
+    ].filter((sec) => sec.items.length);
+  }
+
+  async search(userId, query) {
+    const q = new URLSearchParams({
+      searchTerm: query,
+      Recursive: 'true',
+      IncludeItemTypes: 'Movie,Series,Episode,Video,MusicVideo',
+      Limit: '40',
+    });
+    const res = await this.json(`/Users/${encodeURIComponent(userId)}/Items?${q}`);
+    return [{ title: `Results for “${query}”`, items: (res.Items ?? []).map(normalizeItem) }];
+  }
+
+  /** Contents of a library/folder, or the episodes of a series. */
+  async children(userId, item) {
+    if (item.type === 'Series') {
+      const res = await this.json(`/Shows/${encodeURIComponent(item.id)}/Episodes?userId=${encodeURIComponent(userId)}&Fields=Overview`);
+      return [{ title: item.name, items: (res.Items ?? []).map(normalizeItem) }];
+    }
+    const q = new URLSearchParams({
+      ParentId: item.id,
+      Recursive: 'true',
+      IncludeItemTypes: 'Movie,Series,Video,MusicVideo',
+      SortBy: 'SortName',
+      Limit: '200',
+    });
+    const res = await this.json(`/Users/${encodeURIComponent(userId)}/Items?${q}`);
+    return [{ title: item.name, items: (res.Items ?? []).map(normalizeItem) }];
+  }
+
+  /** Starts playing an item on a session ("cast" it to the TV). */
+  async play(session, itemId) {
+    const q = new URLSearchParams({ playCommand: 'PlayNow', itemIds: itemId });
+    await this.request('POST', `/Sessions/${encodeURIComponent(session.sessionId)}/Playing?${q}`);
   }
 
   /**

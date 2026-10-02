@@ -102,9 +102,31 @@ async function handle(manager, msg) {
       return manager.jellyfinStatus(device);
     case 'jellyfin.control':
       return manager.jellyfinControl(device, msg.action, msg.value);
+    case 'jellyfin.browse':
+      return manager.jellyfinBrowse(device, { view: msg.view, query: msg.query, item: msg.item });
+    case 'jellyfin.play':
+      return manager.jellyfinPlay(device, msg.itemId);
+    case 'apps.list':
+      return manager.listApps(device);
     default:
       throw new Error(`Unknown operation: ${op}`);
   }
+}
+
+function readRaw(req, limit) {
+  return new Promise((resolve, reject) => {
+    let size = 0;
+    const chunks = [];
+    req.on('data', (c) => {
+      size += c.length;
+      if (size > limit) {
+        reject(Object.assign(new Error('File too large'), { status: 413 }));
+        req.destroy();
+      } else chunks.push(c);
+    });
+    req.on('end', () => resolve(Buffer.concat(chunks)));
+    req.on('error', reject);
+  });
 }
 
 function readBody(req, limit = 64 * 1024) {
@@ -137,6 +159,9 @@ function readBody(req, limit = 64 * 1024) {
  *   GET  /api/devices/:device/jellyfin       what Jellyfin is playing on the TV
  *   POST /api/devices/:device/{key,text,open,power,wake,volume,sleep,macro,jellyfin}
  *   GET  /api/jellyfin/image/:itemId?tag=    poster proxy (keeps the API key server-side)
+ *   GET  /api/devices/:device/apps           installed apps (Fire TV) or app catalog
+ *   GET  /api/devices/:device/screenshot     PNG of the screen (Fire TV)
+ *   POST /api/devices/:device/install        raw APK body → install (Fire TV)
  * :device is the device id or its name. Auth: "Authorization: Bearer <token>"
  * or ?token=, when KALIMOTE_TOKEN is set.
  */
@@ -162,6 +187,22 @@ async function handleApi(manager, req, res, url) {
       res.end(Buffer.from(await upstream.arrayBuffer()));
       return;
     }
+    if (parts[1] === 'devices' && parts.length === 4 && parts[3] === 'screenshot' && req.method === 'GET') {
+      const png = await manager.screenshot(manager.get(parts[2]).id);
+      res.writeHead(200, { 'content-type': 'image/png', 'cache-control': 'no-store' });
+      res.end(png);
+      return;
+    }
+    if (parts[1] === 'devices' && parts.length === 4 && parts[3] === 'apps' && req.method === 'GET') {
+      return send(200, await manager.listApps(manager.get(parts[2]).id));
+    }
+    if (parts[1] === 'devices' && parts.length === 4 && parts[3] === 'install' && req.method === 'POST') {
+      // Raw APK bytes in the body (Content-Type: application/vnd.android.package-archive).
+      const device = manager.get(parts[2]).id;
+      const apk = await readRaw(req, 512 * 1024 * 1024);
+      const output = await manager.installApk(device, apk);
+      return send(200, { ok: true, result: output });
+    }
     if (parts[1] === 'devices' && parts.length === 4 && parts[3] === 'jellyfin' && req.method === 'GET') {
       return send(200, await manager.jellyfinStatus(manager.get(parts[2]).id));
     }
@@ -183,6 +224,7 @@ async function handleApi(manager, req, res, url) {
         sleep: () => manager.setSleepTimer(device, body.minutes ?? 0),
         macro: () => manager.runMacro(device, { macro: body.name ?? body.macro, script: body.script }),
         jellyfin: () => manager.jellyfinControl(device, body.action, body.value),
+        'jellyfin-play': () => manager.jellyfinPlay(device, body.itemId),
       };
       if (!ops[action]) return send(404, { ok: false, error: `Unknown action: ${action}` });
       const result = await ops[action]();

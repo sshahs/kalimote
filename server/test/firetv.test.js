@@ -183,3 +183,48 @@ test('DeviceManager: add, pair (approve on TV), control and Jellyfin detection f
     fs.rmSync(dataDir, { recursive: true, force: true });
   }
 });
+
+test('appName and parsePackages', async () => {
+  const { appName } = await import('../src/apps.js');
+  const { parsePackages } = await import('../src/adb/firetv.js');
+  assert.equal(appName('com.netflix.ninja'), 'Netflix');
+  assert.equal(appName('com.amazon.firetv.youtube'), 'YouTube');
+  assert.equal(appName('org.jellyfin.androidtv.debug'), 'Jellyfin (debug)');
+  assert.equal(appName('com.example.coolapp'), 'Coolapp');
+  assert.equal(appName('org.videolan.vlc'), 'VLC');
+  assert.deepEqual(
+    parsePackages('priority=0 match=0x1\n  com.netflix.ninja/.MainActivity\n  org.xbmc.kodi/org.xbmc.kodi.Splash\npackage:com.x.y'),
+    ['com.netflix.ninja', 'org.xbmc.kodi', 'com.x.y'],
+  );
+});
+
+test('Fire TV: list apps, screenshot, push + install an APK', async () => {
+  const fire = await new MockFireTv().listen();
+  const conn = new FireTvConnection({ host: '127.0.0.1', port: fire.port, key: identity.key });
+  conn.on('error', () => {});
+  try {
+    await conn.connect({ approvalTimeoutMs: 3000 });
+    const apps = await conn.listApps();
+    assert.deepEqual(apps.map((a) => a.name), ['Coolapp', 'Jellyfin', 'Jellyfin (debug)', 'Netflix', 'VLC', 'YouTube']);
+    assert.equal(apps.find((a) => a.name === 'Netflix').package, 'com.netflix.ninja');
+
+    const png = await conn.screenshot();
+    assert.equal(png.subarray(1, 4).toString(), 'PNG');
+    assert.ok(png.length > 500);
+
+    await assert.rejects(conn.installApk(Buffer.from('not an apk')), /not an APK/);
+    // ~300 KB fake APK: exercises multiple 64 KB DATA chunks and flow control.
+    const apk = Buffer.concat([Buffer.from('PK\x03\x04'), crypto.randomBytes(300 * 1024)]);
+    const progress = [];
+    const installed = new Promise((r) => fire.once('installed', r));
+    const out = await conn.installApk(apk, { onProgress: (phase, sent, total) => progress.push([phase, sent, total]) });
+    assert.match(out, /Success/);
+    assert.ok((await installed).equals(apk), 'device received the exact bytes');
+    assert.ok(progress.filter(([p]) => p === 'upload').length >= 5);
+    assert.deepEqual(progress.at(-1), ['install', apk.length, apk.length]);
+    await waitFor(() => fire.files.size === 0); // temp file removed
+  } finally {
+    conn.disconnect();
+    fire.close();
+  }
+});

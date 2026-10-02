@@ -123,6 +123,7 @@
         <button class="link" type="button" id="jf-setup-btn">Set up</button>
       </p>
       <p class="hint" id="jf-nosession" hidden>Nothing playing in Jellyfin on this TV right now.</p>
+      <button class="pill jf-browse-btn" data-jf-browse hidden>Browse library</button>
 
       <div class="jf-keys">
         <button class="pill" data-key="MEDIA_REWIND" title="Skip back">« Skip</button>
@@ -134,6 +135,18 @@
         <button class="pill" data-key="MEDIA_STOP" title="Stop">Stop</button>
         <button class="pill" data-key="SEARCH" title="Search">Search</button>
       </div>
+    </section>
+
+    <section class="row tools-row" id="firetv-tools" hidden>
+      <button class="pill" id="screenshot-btn">
+        <svg viewBox="0 0 24 24"><rect x="3" y="6" width="18" height="13" rx="2" /><circle cx="12" cy="12.5" r="3.5" /><path d="M8 6l1.5-2h5L16 6" /></svg>
+        Screenshot
+      </button>
+      <button class="pill" id="install-btn">
+        <svg viewBox="0 0 24 24"><path d="M12 3v12M7 10l5 5 5-5M5 20h14" /></svg>
+        Install APK
+      </button>
+      <input type="file" id="apk-file" accept=".apk,application/vnd.android.package-archive" hidden>
     </section>
 
     <details class="extras">
@@ -159,6 +172,9 @@
 
     <section class="apps">
       <h2>Apps <span class="now-playing" id="current-app"></span></h2>
+      <button class="pill jf-browse-btn wide" data-jf-browse hidden>
+        <span class="jf-logo" aria-hidden="true"></span> Jellyfin library
+      </button>
       <div class="app-grid" id="app-grid"></div>
       <form class="link-form" id="link-form">
         <input name="url" type="url" placeholder="Paste a YouTube / Netflix / any link to open on TV" autocomplete="off" required>
@@ -316,6 +332,53 @@
         <button class="primary">Test &amp; save</button>
       </div>
     </form>
+  </dialog>
+
+  <dialog id="apps-dialog" class="tall">
+    <div class="dialog-head">
+      <h2 id="apps-title">Apps</h2>
+      <button class="icon-btn" type="button" id="apps-close" aria-label="Close">✕</button>
+    </div>
+    <p class="hint" id="apps-hint"></p>
+    <input id="apps-filter" placeholder="Filter…" autocomplete="off">
+    <ul class="pick-list" id="apps-list"></ul>
+    <button class="link" type="button" id="apps-custom">Add a custom link instead…</button>
+  </dialog>
+
+  <dialog id="shot-dialog" class="wide">
+    <div class="dialog-head">
+      <h2>TV screen</h2>
+      <button class="icon-btn" type="button" id="shot-close" aria-label="Close">✕</button>
+    </div>
+    <div class="shot-frame"><img id="shot-img" alt="Screenshot of the TV"><p class="hint" id="shot-status"></p></div>
+    <div class="actions">
+      <label class="toggle"><input type="checkbox" id="shot-live"> Live (every 2 s)</label>
+      <a class="pill" id="shot-save" download="tv-screenshot.png">Save</a>
+      <button class="primary" type="button" id="shot-refresh">Refresh</button>
+    </div>
+  </dialog>
+
+  <dialog id="install-dialog">
+    <h2>Install on <span id="install-tv"></span></h2>
+    <p id="install-file"></p>
+    <progress id="install-progress" max="100" value="0"></progress>
+    <p class="hint" id="install-status"></p>
+    <div class="actions"><button type="button" id="install-close">Close</button></div>
+  </dialog>
+
+  <dialog id="browse-dialog" class="tall wide">
+    <div class="dialog-head">
+      <button class="icon-btn small" type="button" id="browse-back" aria-label="Back" hidden>
+        <svg viewBox="0 0 24 24"><path d="M15 6l-6 6 6 6" /></svg>
+      </button>
+      <h2 id="browse-title">Jellyfin</h2>
+      <button class="icon-btn" type="button" id="browse-close" aria-label="Close">✕</button>
+    </div>
+    <form id="browse-search" class="link-form">
+      <input name="q" type="search" placeholder="Search movies and shows" autocomplete="off">
+      <button class="primary">Search</button>
+    </form>
+    <div id="browse-body" class="browse-body"></div>
   </dialog>
 
   <div id="toast" class="toast" role="status" aria-live="polite"></div>

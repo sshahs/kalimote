@@ -281,18 +281,7 @@ function renderApps() {
   const add = document.createElement('button');
   add.className = 'add';
   add.textContent = '+ Add app';
-  add.addEventListener('click', () => {
-    const name = prompt('Shortcut name');
-    if (!name) return;
-    const url = prompt(
-      'App link to open.\nUse market://launch?id=<package.name> for any installed app, or a deep link URL.',
-      'market://launch?id=',
-    );
-    if (!url) return;
-    state.apps.push({ name, url });
-    store.set('apps', state.apps);
-    renderApps();
-  });
+  add.addEventListener('click', openAppPicker);
   grid.append(add);
 }
 
@@ -595,6 +584,11 @@ function render() {
   $('#touchpad-toggle').setAttribute('aria-pressed', String(state.touchpad));
   $('#dpad').hidden = state.touchpad;
   $('#touchpad').hidden = !state.touchpad;
+
+  $('#firetv-tools').hidden = !(connected && d?.type === 'firetv');
+  for (const b of document.querySelectorAll('[data-jf-browse]')) {
+    b.hidden = !(connected && state.jellyfin.configured);
+  }
 
   renderManage();
   renderJellyfin();
@@ -912,6 +906,286 @@ $('#jellyfin-remove').addEventListener('click', async () => {
   $('#jellyfin-dialog').close();
   toast('Jellyfin server removed');
 });
+
+// ---------------------------------------------------------------- app picker
+
+function tokenQuery(extra = {}) {
+  const token = store.get('token', '');
+  return new URLSearchParams({ ...extra, ...(token ? { token } : {}) }).toString();
+}
+
+function addCustomApp() {
+  const name = prompt('Shortcut name');
+  if (!name) return;
+  const url = prompt(
+    'App link to open.\nUse market://launch?id=<package.name> for any installed app, or a deep link URL.',
+    'market://launch?id=',
+  );
+  if (!url) return;
+  state.apps.push({ name, url });
+  store.set('apps', state.apps);
+  renderApps();
+}
+
+let pickerApps = [];
+async function openAppPicker() {
+  const d = current();
+  $('#apps-list').replaceChildren();
+  $('#apps-filter').value = '';
+  $('#apps-title').textContent = 'Apps';
+  $('#apps-hint').textContent = 'Loading…';
+  $('#apps-dialog').showModal();
+  if (!d?.state?.connected) {
+    $('#apps-hint').textContent = 'Connect to a TV to see its apps.';
+    return;
+  }
+  try {
+    const res = await call('apps.list', { device: d.id });
+    pickerApps = res.apps;
+    $('#apps-title').textContent = res.installed ? `Apps on ${d.name}` : 'Popular apps';
+    $('#apps-hint').textContent = res.installed
+      ? 'Installed apps. Open one now, or add it to your shortcuts.'
+      : "Google TV can't list installed apps, so here are popular ones. Opening one that isn't installed does nothing.";
+    renderPicker();
+  } catch (e) {
+    $('#apps-hint').textContent = e.message;
+  }
+}
+
+function renderPicker() {
+  const q = $('#apps-filter').value.trim().toLowerCase();
+  const have = new Set(state.apps.map((a) => a.url));
+  $('#apps-list').replaceChildren(
+    ...pickerApps
+      .filter((a) => !q || a.name.toLowerCase().includes(q) || a.package.includes(q))
+      .map((a) => {
+        const url = `market://launch?id=${a.package}`;
+        const added = have.has(url);
+        return li(
+          a.name,
+          a.package,
+          null,
+          button('Open', () => {
+            const d = current();
+            call('launch', { device: d.id, url })
+              .then(() => toast(`Opening ${a.name}…`))
+              .catch(report);
+          }),
+          button(added ? 'Added' : 'Add', (e) => {
+            if (added) return;
+            state.apps.push({ name: a.name, url });
+            store.set('apps', state.apps);
+            renderApps();
+            renderPicker();
+          }, added ? '' : 'primary'),
+        );
+      }),
+  );
+}
+$('#apps-filter').addEventListener('input', renderPicker);
+$('#apps-close').addEventListener('click', () => $('#apps-dialog').close());
+$('#apps-custom').addEventListener('click', () => {
+  $('#apps-dialog').close();
+  addCustomApp();
+});
+
+// ---------------------------------------------------------------- Fire TV: screenshot
+
+let shotTimer = null;
+function loadShot() {
+  const d = current();
+  if (!d) return;
+  const src = `/api/devices/${encodeURIComponent(d.id)}/screenshot?${tokenQuery({ t: Date.now() })}`;
+  $('#shot-status').textContent = $('#shot-img').getAttribute('src') ? '' : 'Capturing…';
+  const img = new Image();
+  img.onload = () => {
+    $('#shot-img').src = src;
+    $('#shot-save').href = src;
+    $('#shot-status').textContent = '';
+  };
+  img.onerror = () => {
+    $('#shot-status').textContent = 'Could not capture the screen.';
+  };
+  img.src = src;
+}
+$('#screenshot-btn').addEventListener('click', () => {
+  $('#shot-img').removeAttribute('src');
+  $('#shot-live').checked = false;
+  $('#shot-dialog').showModal();
+  loadShot();
+});
+$('#shot-refresh').addEventListener('click', loadShot);
+$('#shot-live').addEventListener('change', (e) => {
+  clearInterval(shotTimer);
+  if (e.target.checked) shotTimer = setInterval(loadShot, 2000);
+});
+$('#shot-close').addEventListener('click', () => $('#shot-dialog').close());
+$('#shot-dialog').addEventListener('close', () => {
+  clearInterval(shotTimer);
+  $('#shot-live').checked = false;
+});
+
+// ---------------------------------------------------------------- Fire TV: install APK
+
+$('#install-btn').addEventListener('click', () => $('#apk-file').click());
+$('#apk-file').addEventListener('change', (e) => {
+  const file = e.target.files[0];
+  e.target.value = '';
+  const d = current();
+  if (!file || !d) return;
+  $('#install-tv').textContent = d.name;
+  $('#install-file').textContent = `${file.name} · ${(file.size / 1048576).toFixed(1)} MB`;
+  $('#install-progress').value = 0;
+  $('#install-status').textContent = 'Uploading…';
+  $('#install-close').textContent = 'Close';
+  $('#install-dialog').showModal();
+  const xhr = new XMLHttpRequest();
+  xhr.open('POST', `/api/devices/${encodeURIComponent(d.id)}/install?${tokenQuery()}`);
+  xhr.setRequestHeader('content-type', 'application/vnd.android.package-archive');
+  xhr.upload.onprogress = (ev) => {
+    if (!ev.lengthComputable) return;
+    const pct = Math.round((ev.loaded / ev.total) * 100);
+    $('#install-progress').value = pct * 0.5;
+    $('#install-status').textContent = pct < 100 ? `Uploading… ${pct}%` : 'Sending to the TV and installing… (this can take a minute)';
+  };
+  xhr.upload.onload = () => {
+    $('#install-progress').removeAttribute('value'); // indeterminate while the TV installs
+    $('#install-status').textContent = 'Sending to the TV and installing… (this can take a minute)';
+  };
+  xhr.onload = () => {
+    let res = {};
+    try {
+      res = JSON.parse(xhr.responseText);
+    } catch {}
+    $('#install-progress').value = res.ok ? 100 : 0;
+    $('#install-status').textContent = res.ok ? `Installed ${file.name} ✓` : `Install failed: ${res.error ?? xhr.status}`;
+    if (res.ok) toast('App installed');
+  };
+  xhr.onerror = () => {
+    $('#install-status').textContent = 'Upload failed (lost connection to the Kalimote server).';
+  };
+  xhr.send(file);
+});
+$('#install-close').addEventListener('click', () => $('#install-dialog').close());
+
+// ---------------------------------------------------------------- Jellyfin library
+
+const browseStack = []; // [{ title, request }]
+
+function fmtRuntime(ms) {
+  if (!ms) return '';
+  const m = Math.round(ms / 60000);
+  return m >= 60 ? `${Math.floor(m / 60)}h ${m % 60}m` : `${m}m`;
+}
+
+function card(item) {
+  const b = document.createElement('button');
+  b.type = 'button';
+  b.className = `card${item.type === 'Episode' || item.type === 'CollectionFolder' ? ' wide-art' : ''}`;
+  const poster = document.createElement('div');
+  poster.className = 'poster';
+  if (item.imageTag) {
+    const img = document.createElement('img');
+    img.loading = 'lazy';
+    img.alt = '';
+    img.src = `/api/jellyfin/image/${encodeURIComponent(item.id)}?${tokenQuery({ tag: item.imageTag })}`;
+    img.onerror = () => img.remove();
+    poster.append(img);
+  }
+  if (item.progress) {
+    const bar = document.createElement('div');
+    bar.className = 'bar';
+    bar.style.width = `${Math.min(100, item.progress)}%`;
+    poster.append(bar);
+  }
+  if (!item.browsable) {
+    const play = document.createElement('span');
+    play.className = 'play';
+    play.textContent = '▶';
+    poster.append(play);
+  }
+  const t = document.createElement('div');
+  t.className = 't';
+  t.textContent = item.type === 'Episode' ? `${item.episode ?? ''}. ${item.name}` : item.name;
+  const sub = document.createElement('div');
+  sub.className = 's';
+  sub.textContent =
+    item.type === 'Episode'
+      ? `${item.seriesName ?? ''} · S${item.season ?? '?'}`
+      : [item.year, fmtRuntime(item.runtimeMs)].filter(Boolean).join(' · ');
+  b.append(poster, t, sub);
+  b.addEventListener('click', () => (item.browsable ? openBrowse({ view: 'open', item }, item.name) : playOnTv(item)));
+  return b;
+}
+
+async function playOnTv(item) {
+  const d = current();
+  toast(`Starting ${item.name} on ${d.name}…`);
+  try {
+    await call('jellyfin.play', { device: d.id, itemId: item.id });
+    $('#browse-dialog').close();
+    toast(`Playing ${item.name}`);
+    setTimeout(pollJellyfin, 800);
+  } catch (e) {
+    report(e);
+  }
+}
+
+async function openBrowse(request, title, push = true) {
+  const d = current();
+  if (!d) return;
+  if (push) browseStack.push({ request, title });
+  $('#browse-title').textContent = title;
+  $('#browse-back').hidden = browseStack.length <= 1;
+  const body = $('#browse-body');
+  body.replaceChildren(Object.assign(document.createElement('p'), { className: 'hint', textContent: 'Loading…' }));
+  if (!$('#browse-dialog').open) $('#browse-dialog').showModal();
+  try {
+    const res = await call('jellyfin.browse', { device: d.id, ...request });
+    if (browseStack.at(-1)?.request !== request) return; // navigated away meanwhile
+    const sections = res.sections.filter((sec) => sec.items.length);
+    body.replaceChildren(
+      ...(sections.length
+        ? sections.map((sec) => {
+            const wrap = document.createElement('section');
+            const h = document.createElement('h3');
+            h.textContent = sec.title;
+            const grid = document.createElement('div');
+            grid.className = 'cards';
+            grid.append(...sec.items.map(card));
+            wrap.append(h, grid);
+            return wrap;
+          })
+        : [Object.assign(document.createElement('p'), { className: 'hint', textContent: 'Nothing here.' })]),
+    );
+  } catch (e) {
+    body.replaceChildren(Object.assign(document.createElement('p'), { className: 'error', textContent: e.message }));
+  }
+}
+
+document.addEventListener('click', (e) => {
+  if (!e.target.closest('[data-jf-browse]')) return;
+  browseStack.length = 0;
+  $('#browse-search').q.value = '';
+  openBrowse({ view: 'home' }, 'Jellyfin');
+});
+$('#browse-back').addEventListener('click', () => {
+  browseStack.pop();
+  const prev = browseStack.at(-1);
+  if (prev) openBrowse(prev.request, prev.title, false);
+});
+$('#browse-close').addEventListener('click', () => $('#browse-dialog').close());
+$('#browse-search').addEventListener('submit', (e) => {
+  e.preventDefault();
+  const q = e.target.q.value.trim();
+  if (q) openBrowse({ view: 'search', query: q }, `Search: ${q}`);
+});
+
+for (const id of ['#apps-dialog', '#shot-dialog', '#browse-dialog']) {
+  $(id).addEventListener('click', (e) => {
+    if (e.target === e.currentTarget) e.currentTarget.close();
+  });
+}
 
 renderApps();
 renderMacros();
