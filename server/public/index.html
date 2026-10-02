@@ -186,20 +186,35 @@
     <form id="add-form" class="add-form">
       <input name="host" placeholder="192.168.1.50" required autocomplete="off" inputmode="decimal">
       <input name="name" placeholder="Name (optional)" autocomplete="off">
+      <select name="type" aria-label="Device type">
+        <option value="androidtv">Google TV / Android TV</option>
+        <option value="firetv">Amazon Fire TV</option>
+      </select>
       <button class="primary">Add</button>
     </form>
-    <p class="hint">On the TV, the remote service must be enabled (it is on by default on Google TV / Android TV with Google services). The TV and this server must be on the same network.</p>
+    <p class="hint"><b>Google TV / Android TV:</b> works out of the box with the code shown on screen.
+      <b>Fire TV:</b> turn on <i>Settings → My Fire TV → Developer options → ADB debugging</i> first
+      (no Developer options? open <i>About</i> and click your device name 7 times). The TV and this server must be on the same network.</p>
   </dialog>
 
   <dialog id="pair-dialog">
     <form id="pair-form">
       <h2>Pair with <span id="pair-name"></span></h2>
-      <p>Enter the code shown on your TV.</p>
-      <input id="pair-code" name="code" maxlength="6" autocomplete="off" autocapitalize="characters" spellcheck="false" pattern="[0-9A-Fa-f]{6}" required>
+      <div id="pair-code-mode">
+        <p>Enter the code shown on your TV.</p>
+        <input id="pair-code" name="code" maxlength="6" autocomplete="off" autocapitalize="characters" spellcheck="false" pattern="[0-9A-Fa-f]{6}">
+      </div>
+      <div id="pair-adb-mode" hidden>
+        <ol class="steps">
+          <li>On the Fire TV, turn on <b>Settings → My Fire TV → Developer options → ADB debugging</b>.</li>
+          <li>A prompt <b>“Allow USB debugging?”</b> appears on the TV. Tick <b>Always allow from this computer</b> and choose <b>Allow</b>.</li>
+        </ol>
+      </div>
       <p class="error" id="pair-error"></p>
       <div class="actions">
         <button type="button" id="pair-cancel">Cancel</button>
-        <button class="primary">Pair</button>
+        <button type="button" id="pair-retry" hidden>Try again</button>
+        <button class="primary" id="pair-submit">Pair</button>
       </div>
     </form>
   </dialog>

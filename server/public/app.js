@@ -305,7 +305,7 @@ $('#add-form').addEventListener('submit', async (e) => {
   e.preventDefault();
   const form = e.target;
   try {
-    const d = await call('add', { host: form.host.value, name: form.name.value });
+    const d = await call('add', { host: form.host.value, name: form.name.value, type: form.type.value });
     form.reset();
     selectDevice(d.id);
     startPairing(d);
@@ -366,7 +366,7 @@ function renderManage() {
       ...state.devices.map((d) =>
         li(
           d.name,
-          `${d.host} · ${deviceStatus(d)}`,
+          `${d.type === 'firetv' ? 'Fire TV · ' : ''}${d.host} · ${deviceStatus(d)}`,
           d.error,
           d.paired
             ? d.state?.connected
@@ -396,11 +396,11 @@ function renderManage() {
       ...state.discovered.map((d) =>
         li(
           d.name,
-          d.host,
+          `${d.type === 'firetv' ? 'Amazon Fire TV · ' : ''}${d.host}`,
           null,
           button('Add', async () => {
             try {
-              const added = await call('add', { host: d.host, name: d.name });
+              const added = await call('add', { host: d.host, name: d.name, type: d.type });
               selectDevice(added.id);
               startPairing(added);
             } catch (err) {
@@ -417,18 +417,38 @@ function renderManage() {
 
 async function startPairing(d) {
   state.pairingDevice = d;
+  const adb = d.type === 'firetv';
   $('#pair-name').textContent = d.name;
-  $('#pair-error').textContent = 'Connecting to TV…';
+  $('#pair-code-mode').hidden = adb;
+  $('#pair-adb-mode').hidden = !adb;
+  $('#pair-code').required = !adb;
+  $('#pair-submit').hidden = adb;
+  $('#pair-retry').hidden = true;
+  $('#pair-error').textContent = adb ? 'Waiting for you to allow Kalimote on the TV…' : 'Connecting to TV…';
+  $('#pair-error').classList.add('pending');
   $('#pair-code').value = '';
-  $('#pair-dialog').showModal();
+  if (!$('#pair-dialog').open) $('#pair-dialog').showModal();
   try {
     await call('pair.start', { device: d.id });
+    if (adb) {
+      $('#pair-dialog').close();
+      $('#manage-dialog').close();
+      selectDevice(d.id);
+      toast(`Paired with ${d.name}`);
+      return;
+    }
     $('#pair-error').textContent = '';
+    $('#pair-error').classList.remove('pending');
     $('#pair-code').focus();
   } catch (e) {
+    if (state.pairingDevice?.id !== d.id || /cancelled/.test(e.message)) return;
+    $('#pair-error').classList.remove('pending');
     $('#pair-error').textContent = e.message;
+    $('#pair-retry').hidden = !adb;
   }
 }
+
+$('#pair-retry').addEventListener('click', () => state.pairingDevice && startPairing(state.pairingDevice));
 
 $('#pair-code').addEventListener('input', (e) => {
   e.target.value = e.target.value.toUpperCase().replace(/[^0-9A-F]/g, '');
@@ -498,6 +518,12 @@ function prettyApp(pkg) {
   const known = {
     'com.google.android.tvlauncher': 'Home',
     'com.google.android.apps.tv.launcherx': 'Home',
+    'com.amazon.tv.launcher': 'Home',
+    'com.amazon.firetv.youtube': 'YouTube',
+    'com.amazon.cloud9': 'Silk Browser',
+    'com.amazon.avod': 'Prime Video',
+    'com.amazon.avod.thirdpartyclient': 'Prime Video',
+    'com.amazon.tv.settings.v2': 'Settings',
     'com.google.android.youtube.tv': 'YouTube',
     'com.netflix.ninja': 'Netflix',
     'com.amazon.amazonvideo.livingroom': 'Prime Video',

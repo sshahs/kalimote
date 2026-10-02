@@ -8,6 +8,10 @@ import { RemoteConnection, REMOTE_PORT } from './protocol/remote.js';
 import { parseMacro, runMacro } from './macros.js';
 import { wake, lookupMac, normalizeMac } from './wol.js';
 import { JellyfinClient, detectJellyfin } from './jellyfin.js';
+import { FireTvConnection } from './adb/firetv.js';
+import { ADB_PORT } from './adb/client.js';
+
+export const DEVICE_TYPES = ['androidtv', 'firetv'];
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -66,6 +70,7 @@ export class DeviceManager extends EventEmitter {
 
   list() {
     const known = [...this.devices.values()].map((d) => ({
+      type: 'androidtv',
       ...d,
       pairing: this.pairings.has(d.id),
       error: this.errors.get(d.id) ?? null,
@@ -94,17 +99,22 @@ export class DeviceManager extends EventEmitter {
     return d;
   }
 
-  add({ host, name, pairingPort, remotePort }) {
+  add({ host, name, pairingPort, remotePort, type }) {
     host = String(host ?? '').trim();
     if (!/^[\w.:-]+$/.test(host)) throw new Error('A valid host name or IP address is required');
     const existing = [...this.devices.values()].find((d) => d.host === host);
     if (existing) return existing;
+    const found = this.discovered.get(host);
+    type = type || found?.type || 'androidtv';
+    if (!DEVICE_TYPES.includes(type)) throw new Error(`Unknown device type: ${type}`);
     const device = {
       id: crypto.randomUUID(),
-      name: String(name || this.discovered.get(host)?.name || host).slice(0, 80),
+      type,
+      name: String(name || found?.name || host).slice(0, 80),
       host,
       pairingPort: Number(pairingPort) || PAIRING_PORT,
-      remotePort: Number(remotePort) || this.discovered.get(host)?.port || REMOTE_PORT,
+      remotePort:
+        Number(remotePort) || (type === 'firetv' ? ADB_PORT : (found?.type === 'androidtv' && found.port) || REMOTE_PORT),
       paired: false,
     };
     this.devices.set(device.id, device);
@@ -152,6 +162,7 @@ export class DeviceManager extends EventEmitter {
 
   async startPairing(id) {
     const d = this.get(id);
+    if (d.type === 'firetv') return this.pairFireTv(d);
     this.pairings.get(id)?.close();
     this.connections.get(id)?.disconnect();
     const session = new PairingSession({
@@ -192,9 +203,41 @@ export class DeviceManager extends EventEmitter {
     await this.connect(id);
   }
 
-  cancelPairing(id) {
+  /**
+   * Fire TV "pairing": connect over ADB and offer our key; the TV shows
+   * "Allow USB debugging?" and this resolves once the user accepts.
+   */
+  async pairFireTv(d) {
+    const id = d.id;
     this.pairings.get(id)?.close();
+    this.connections.get(id)?.disconnect();
+    this.connections.delete(id);
+    const conn = this.connection(id);
+    this.pairings.set(id, { close: () => conn.disconnect(), adb: true });
+    this.setError(id, null);
+    try {
+      await conn.connect({ approvalTimeoutMs: 90000 });
+    } catch (e) {
+      if (!this.pairings.has(id)) throw new Error('Pairing cancelled');
+      this.pairings.delete(id);
+      const msg =
+        e.code === 'closed' || e.code === 'timeout'
+          ? `${e.message}. Is ADB debugging on? (Settings → My Fire TV → Developer options)`
+          : e.message;
+      this.setError(id, new Error(msg));
+      throw new Error(msg);
+    }
     this.pairings.delete(id);
+    d.paired = true;
+    this.save();
+    this.setError(id, null);
+    return { paired: true };
+  }
+
+  cancelPairing(id) {
+    const p = this.pairings.get(id);
+    this.pairings.delete(id);
+    p?.close();
     this.changed();
   }
 
@@ -202,12 +245,15 @@ export class DeviceManager extends EventEmitter {
     const d = this.get(id);
     let conn = this.connections.get(id);
     if (!conn) {
-      conn = new RemoteConnection({
-        host: d.host,
-        port: d.remotePort,
-        ...this.identity,
-        deviceInfo: { model: this.clientName, vendor: 'Kalimote' },
-      });
+      conn =
+        d.type === 'firetv'
+          ? new FireTvConnection({ host: d.host, port: d.remotePort, key: this.identity.key })
+          : new RemoteConnection({
+              host: d.host,
+              port: d.remotePort,
+              ...this.identity,
+              deviceInfo: { model: this.clientName, vendor: 'Kalimote' },
+            });
       conn.on('state', (st) => {
         // Remember the TV's MAC address for Wake-on-LAN once we have talked to it.
         if (st.connected && !d.mac) {
@@ -380,23 +426,28 @@ export class DeviceManager extends EventEmitter {
     import('bonjour-service')
       .then(({ Bonjour }) => {
         this.bonjour = new Bonjour();
-        this.browser = this.bonjour.find({ type: 'androidtvremote2' }, (svc) => {
-          const host = svc.addresses?.find((a) => /^\d+\.\d+\.\d+\.\d+$/.test(a)) ?? svc.referer?.address;
-          if (!host) return;
-          this.discovered.set(host, { name: svc.name, host, port: svc.port });
-          this.changed();
-        });
-        this.browser.on?.('down', (svc) => {
-          for (const [host, d] of this.discovered) if (d.name === svc.name) this.discovered.delete(host);
-          this.changed();
-        });
+        const browse = (bonjourType, type) => {
+          const browser = this.bonjour.find({ type: bonjourType }, (svc) => {
+            const host = svc.addresses?.find((a) => /^\d+\.\d+\.\d+\.\d+$/.test(a)) ?? svc.referer?.address;
+            if (!host) return;
+            this.discovered.set(host, { name: svc.name, host, port: svc.port, type });
+            this.changed();
+          });
+          browser.on?.('down', (svc) => {
+            for (const [host, d] of this.discovered) if (d.name === svc.name) this.discovered.delete(host);
+            this.changed();
+          });
+          return browser;
+        };
+        // Google TV / Android TV remote service, and Amazon Fire TV ("whisperplay").
+        this.browsers = [browse('androidtvremote2', 'androidtv'), browse('amzn-wplay', 'firetv')];
       })
       .catch((e) => console.warn(`mDNS discovery unavailable: ${e.message}`));
   }
 
   rescan() {
     this.discovered.clear();
-    this.browser?.update?.();
+    for (const b of this.browsers ?? []) b.update?.();
     this.changed();
   }
 
@@ -445,7 +496,7 @@ export class DeviceManager extends EventEmitter {
     for (const r of this.running.values()) r.controller.abort();
     for (const c of this.connections.values()) c.disconnect();
     for (const p of this.pairings.values()) p.close();
-    this.browser?.stop?.();
+    for (const b of this.browsers ?? []) b.stop?.();
     this.bonjour?.destroy?.();
   }
 }
