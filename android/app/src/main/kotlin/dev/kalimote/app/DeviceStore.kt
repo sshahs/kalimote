@@ -12,7 +12,16 @@ data class TvDevice(
     val paired: Boolean = false,
     /** For Wake-on-LAN; entered by the user. */
     val mac: String? = null,
-)
+    /** [TYPE_ANDROID_TV] (Google remote protocol) or [TYPE_FIRE_TV] (ADB). */
+    val type: String = TYPE_ANDROID_TV,
+) {
+    val isFireTv: Boolean get() = type == TYPE_FIRE_TV
+
+    companion object {
+        const val TYPE_ANDROID_TV = "androidtv"
+        const val TYPE_FIRE_TV = "firetv"
+    }
+}
 
 data class SavedMacro(val id: String = UUID.randomUUID().toString(), val name: String, val script: String)
 
@@ -42,6 +51,7 @@ class DeviceStore(context: Context) {
                 o.getString("host"),
                 o.optBoolean("paired"),
                 o.optString("mac").takeIf { it.isNotEmpty() },
+                o.optString("type").ifEmpty { TvDevice.TYPE_ANDROID_TV },
             )
         }
     }.getOrDefault(emptyList())
@@ -51,7 +61,7 @@ class DeviceStore(context: Context) {
         devices.forEach {
             arr.put(
                 JSONObject().put("id", it.id).put("name", it.name).put("host", it.host)
-                    .put("paired", it.paired).put("mac", it.mac ?: ""),
+                    .put("paired", it.paired).put("mac", it.mac ?: "").put("type", it.type),
             )
         }
         prefs.edit().putString("devices", arr.toString()).apply()

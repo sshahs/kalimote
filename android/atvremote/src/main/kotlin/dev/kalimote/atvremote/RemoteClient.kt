@@ -9,6 +9,22 @@ import javax.net.ssl.SSLSocket
 
 data class Volume(val level: Int, val max: Int, val muted: Boolean)
 
+/**
+ * A connection to a TV, whatever the protocol: [RemoteClient] (Google TV /
+ * Android TV remote service) or [FireTvClient] (ADB, for Fire TV).
+ * Reconnects by itself; [state] changes are reported to the listener.
+ */
+interface TvClient {
+    val state: RemoteState
+    fun start()
+    fun stop()
+    fun shutdown()
+    fun reconnectNow()
+    fun sendKey(keyCode: Int, direction: Direction = Direction.SHORT)
+    fun sendText(text: String)
+    fun launchApp(url: String)
+}
+
 data class RemoteState(
     val status: Status = Status.DISCONNECTED,
     val powered: Boolean? = null,
@@ -32,9 +48,9 @@ class RemoteClient(
     private val deviceInfo: DeviceInfo = DeviceInfo(),
     private val port: Int = REMOTE_PORT,
     private val listener: (RemoteState) -> Unit,
-) {
+) : TvClient {
     @Volatile
-    var state = RemoteState()
+    override var state = RemoteState()
         private set
 
     @Volatile
@@ -49,7 +65,7 @@ class RemoteClient(
     private var fieldCounter = 0
 
     @Synchronized
-    fun start() {
+    override fun start() {
         if (running) return
         running = true
         thread = Thread(::loop, "atvremote-$host").apply {
@@ -59,7 +75,7 @@ class RemoteClient(
     }
 
     /** Forces an immediate reconnect attempt (e.g. after the app returns to the foreground). */
-    fun reconnectNow() {
+    override fun reconnectNow() {
         if (!running) {
             start()
             return
@@ -68,7 +84,7 @@ class RemoteClient(
     }
 
     @Synchronized
-    fun stop() {
+    override fun stop() {
         running = false
         try {
             socket?.close()
@@ -79,19 +95,19 @@ class RemoteClient(
         update { it.copy(status = RemoteState.Status.DISCONNECTED) }
     }
 
-    fun shutdown() {
+    override fun shutdown() {
         stop()
         writer.shutdown()
     }
 
-    fun sendKey(keyCode: Int, direction: Direction = Direction.SHORT) = send(Remote.key(keyCode, direction))
+    override fun sendKey(keyCode: Int, direction: Direction) = send(Remote.key(keyCode, direction))
 
-    fun sendText(text: String) {
+    override fun sendText(text: String) {
         if (text.isEmpty()) return
         send(Remote.imeBatchEdit(imeCounter, fieldCounter, text))
     }
 
-    fun launchApp(url: String) = send(Remote.appLink(url))
+    override fun launchApp(url: String) = send(Remote.appLink(url))
 
     private fun send(payload: ByteArray) {
         if (writer.isShutdown) return

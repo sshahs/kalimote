@@ -520,7 +520,11 @@ private fun AddAppDialog(onDismiss: () -> Unit, onAdd: (AppShortcut) -> Unit) {
 }
 
 fun prettyApp(pkg: String): String = when (pkg) {
-    "com.google.android.tvlauncher", "com.google.android.apps.tv.launcherx" -> "Home"
+    "com.google.android.tvlauncher", "com.google.android.apps.tv.launcherx", "com.amazon.tv.launcher" -> "Home"
+    "com.amazon.firetv.youtube" -> "YouTube"
+    "com.amazon.avod", "com.amazon.avod.thirdpartyclient" -> "Prime Video"
+    "com.amazon.cloud9" -> "Silk Browser"
+    "com.amazon.tv.settings.v2" -> "Settings"
     "com.google.android.youtube.tv" -> "YouTube"
     "com.netflix.ninja" -> "Netflix"
     "com.amazon.amazonvideo.livingroom" -> "Prime Video"

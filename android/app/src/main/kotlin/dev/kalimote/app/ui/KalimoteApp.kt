@@ -105,7 +105,7 @@ fun KalimoteApp(vm: RemoteViewModel) {
                         showDevices = false
                     },
                     pair = { vm.startPairing(it) },
-                    add = { host, name -> vm.addAndPair(host, name) },
+                    add = { host, name, type -> vm.addAndPair(host, name, type) },
                     edit = { d, name, mac -> vm.editDevice(d.id, name, mac) },
                     remove = { vm.remove(it.id) },
                     rescan = vm::rescan,
@@ -167,6 +167,7 @@ fun KalimoteApp(vm: RemoteViewModel) {
             pairing,
             onSubmit = vm::submitCode,
             onCancel = vm::cancelPairing,
+            onRetry = { vm.startPairing(pairing.device) },
         )
     }
 

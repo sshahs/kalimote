@@ -12,7 +12,7 @@ import android.widget.Toast
 import dev.kalimote.atvremote.DeviceInfo
 import dev.kalimote.atvremote.KeyCodes
 import dev.kalimote.atvremote.Macro
-import dev.kalimote.atvremote.RemoteClient
+import dev.kalimote.atvremote.TvClient
 import dev.kalimote.atvremote.RemoteState
 import dev.kalimote.atvremote.WakeOnLan
 import java.util.concurrent.Executors
@@ -39,8 +39,8 @@ object QuickCommand {
     private val executor = Executors.newSingleThreadScheduledExecutor { r ->
         Thread(r, "kalimote-quick").apply { isDaemon = true }
     }
-    private var warm: RemoteClient? = null
-    private var warmHost: String? = null
+    private var warm: TvClient? = null
+    private var warmKey: String? = null
     private var idle: ScheduledFuture<*>? = null
 
     fun uri(path: String): Uri = Uri.parse("kalimote://quick/$path")
@@ -82,12 +82,12 @@ object QuickCommand {
             ?: return "Pair a TV in Kalimote first"
 
         idle?.cancel(false)
-        val client = warm?.takeIf { warmHost == device.host } ?: run {
+        val client = warm?.takeIf { warmKey == device.type + device.host } ?: run {
             warm?.shutdown()
-            RemoteClient(device.host, Identity.get(context), DeviceInfo(model = Build.MODEL ?: "Android")) {}
+            createTvClient(device, Identity.get(context), DeviceInfo(model = Build.MODEL ?: "Android")) {}
                 .also {
                     warm = it
-                    warmHost = device.host
+                    warmKey = device.type + device.host
                     it.start()
                 }
         }
@@ -124,12 +124,12 @@ object QuickCommand {
             idle = executor.schedule({
                 warm?.shutdown()
                 warm = null
-                warmHost = null
+                warmKey = null
             }, KEEP_WARM_SECONDS, TimeUnit.SECONDS)
         }
     }
 
-    private fun waitFor(client: RemoteClient, timeoutMs: Long, ready: (RemoteState) -> Boolean): RemoteState {
+    private fun waitFor(client: TvClient, timeoutMs: Long, ready: (RemoteState) -> Boolean): RemoteState {
         val deadline = System.currentTimeMillis() + timeoutMs
         while (System.currentTimeMillis() < deadline) {
             val s = client.state

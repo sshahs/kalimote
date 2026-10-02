@@ -16,7 +16,9 @@ import dev.kalimote.atvremote.KeyCodes
 import dev.kalimote.atvremote.Macro
 import dev.kalimote.atvremote.MacroException
 import dev.kalimote.atvremote.PairingSession
-import dev.kalimote.atvremote.RemoteClient
+import dev.kalimote.atvremote.AdbConnection
+import dev.kalimote.atvremote.FireTvClient
+import dev.kalimote.atvremote.TvClient
 import dev.kalimote.atvremote.RemoteState
 import dev.kalimote.atvremote.WakeOnLan
 import kotlinx.coroutines.Job
@@ -35,7 +37,8 @@ data class PairingUi(
     val phase: Phase,
     val error: String? = null,
 ) {
-    enum class Phase { CONNECTING, ENTER_CODE, VERIFYING }
+    /** APPROVE: Fire TV, waiting for "Allow USB debugging?" to be accepted on the TV. */
+    enum class Phase { CONNECTING, ENTER_CODE, VERIFYING, APPROVE }
 }
 
 data class UiState(
@@ -86,7 +89,8 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
     )
     val state: StateFlow<UiState> = _state.asStateFlow()
 
-    private var client: RemoteClient? = null
+    private var client: TvClient? = null
+    private var fireTvPairing: AdbConnection? = null
     @Volatile
     private var clientDeviceId: String? = null
     private var pairingSession: PairingSession? = null
@@ -158,7 +162,7 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             val id = identity()
             if (clientDeviceId != device.id) return@launch
-            val c = RemoteClient(device.host, id, deviceInfo) { remote -> onRemoteState(device.id, remote) }
+            val c = createTvClient(device, id, deviceInfo) { remote -> onRemoteState(device.id, remote) }
             client = c
             if (foreground) c.start()
         }
@@ -205,14 +209,14 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     /** Adds a TV (or returns the existing one with the same host) and starts pairing. */
-    fun addAndPair(host: String, name: String?) {
+    fun addAndPair(host: String, name: String?, type: String = TvDevice.TYPE_ANDROID_TV) {
         val h = host.trim()
         if (!Regex("^[\\w.:-]+$").matches(h)) {
             toast("Enter a valid IP address or host name")
             return
         }
         val existing = _state.value.devices.firstOrNull { it.host == h }
-        val device = existing ?: TvDevice(name = name?.trim().takeUnless { it.isNullOrEmpty() } ?: h, host = h)
+        val device = existing ?: TvDevice(name = name?.trim().takeUnless { it.isNullOrEmpty() } ?: h, host = h, type = type)
         if (existing == null) updateDevices { it + device }
         select(device.id)
         startPairing(device)
@@ -248,6 +252,11 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
     fun startPairing(device: TvDevice, notice: String? = null) {
         if (clientDeviceId == device.id) dropClient()
         pairingSession?.close()
+        fireTvPairing?.close()
+        if (device.isFireTv) {
+            pairFireTv(device)
+            return
+        }
         _state.update { it.copy(pairing = PairingUi(device, PairingUi.Phase.CONNECTING)) }
         viewModelScope.launch {
             try {
@@ -289,7 +298,46 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    /** Fire TV: offer our ADB key; the TV asks the user to allow it. */
+    private fun pairFireTv(device: TvDevice) {
+        _state.update { it.copy(pairing = PairingUi(device, PairingUi.Phase.CONNECTING)) }
+        viewModelScope.launch {
+            val result = withContext(Dispatchers.IO) {
+                runCatching {
+                    FireTvClient.pair(
+                        device.host,
+                        identity(),
+                        connection = { fireTvPairing = it },
+                        onAwaitingApproval = {
+                            _state.update { s -> s.copy(pairing = s.pairing?.copy(phase = PairingUi.Phase.APPROVE)) }
+                        },
+                    )
+                }
+            }
+            if (_state.value.pairing?.device?.id != device.id) return@launch // cancelled
+            fireTvPairing = null
+            result.onSuccess {
+                updateDevice(device.id) { it.copy(paired = true) }
+                _state.update { it.copy(pairing = null) }
+                toast("Paired with ${device.name}")
+                select(device.id)
+            }.onFailure { e ->
+                val msg = e.message ?: "Pairing failed"
+                val hint = if (e is dev.kalimote.atvremote.AdbException &&
+                    e.code != dev.kalimote.atvremote.AdbException.Code.UNAUTHORIZED
+                ) {
+                    "$msg. Is ADB debugging on? (Settings → My Fire TV → Developer options)"
+                } else {
+                    msg
+                }
+                _state.update { s -> s.copy(pairing = s.pairing?.copy(phase = PairingUi.Phase.APPROVE, error = hint)) }
+            }
+        }
+    }
+
     fun cancelPairing() {
+        fireTvPairing?.close()
+        fireTvPairing = null
         pairingSession?.close()
         pairingSession = null
         _state.update { it.copy(pairing = null) }

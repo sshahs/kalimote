@@ -27,6 +27,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -65,7 +66,7 @@ import dev.kalimote.atvremote.RemoteState
 class DeviceActions(
     val select: (TvDevice) -> Unit,
     val pair: (TvDevice) -> Unit,
-    val add: (host: String, name: String?) -> Unit,
+    val add: (host: String, name: String?, type: String) -> Unit,
     /** Returns an error message, or null when saved. */
     val edit: (TvDevice, name: String, mac: String) -> String?,
     val remove: (TvDevice) -> Unit,
@@ -82,6 +83,7 @@ class DeviceActions(
 fun DevicesScreen(state: UiState, actions: DeviceActions, modifier: Modifier = Modifier) {
     var host by rememberSaveable { mutableStateOf("") }
     var name by rememberSaveable { mutableStateOf("") }
+    var type by rememberSaveable { mutableStateOf(TvDevice.TYPE_ANDROID_TV) }
 
     Column(
         modifier
@@ -113,13 +115,17 @@ fun DevicesScreen(state: UiState, actions: DeviceActions, modifier: Modifier = M
             }
         }
         state.newDiscovered.forEach { tv ->
-            Card(onClick = { actions.add(tv.host, tv.name) }) {
+            Card(onClick = { actions.add(tv.host, tv.name, tv.type) }) {
                 Icon(Icons.Filled.Tv, null)
                 Column(Modifier.weight(1f)) {
                     Text(tv.name, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    Text(tv.host, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 13.sp)
+                    Text(
+                        (if (tv.type == TvDevice.TYPE_FIRE_TV) "Amazon Fire TV · " else "") + tv.host,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        fontSize = 13.sp,
+                    )
                 }
-                Button(onClick = { actions.add(tv.host, tv.name) }) { Text("Pair") }
+                Button(onClick = { actions.add(tv.host, tv.name, tv.type) }) { Text("Pair") }
             }
         }
 
@@ -140,10 +146,30 @@ fun DevicesScreen(state: UiState, actions: DeviceActions, modifier: Modifier = M
             singleLine = true,
             modifier = Modifier.fillMaxWidth(),
         )
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            FilterChip(
+                selected = type == TvDevice.TYPE_ANDROID_TV,
+                onClick = { type = TvDevice.TYPE_ANDROID_TV },
+                label = { Text("Google TV / Android TV") },
+            )
+            FilterChip(
+                selected = type == TvDevice.TYPE_FIRE_TV,
+                onClick = { type = TvDevice.TYPE_FIRE_TV },
+                label = { Text("Amazon Fire TV") },
+            )
+        }
+        if (type == TvDevice.TYPE_FIRE_TV) {
+            Text(
+                "On the Fire TV, turn on Settings → My Fire TV → Developer options → ADB debugging. " +
+                    "No Developer options? Open About and click your device name 7 times.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
         Button(
             enabled = host.isNotBlank(),
             onClick = {
-                actions.add(host, name)
+                actions.add(host, name, type)
                 host = ""
                 name = ""
             },
@@ -215,7 +241,11 @@ private fun DeviceRow(d: TvDevice, state: UiState, actions: DeviceActions) {
         )
         Column(Modifier.weight(1f)) {
             Text(d.name, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Text("${d.host} · $status", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 13.sp)
+            Text(
+                (if (d.isFireTv) "Fire TV · " else "") + "${d.host} · $status",
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                fontSize = 13.sp,
+            )
         }
         if (!d.paired) Button(onClick = { actions.pair(d) }) { Text("Pair") }
         Box {
@@ -286,7 +316,11 @@ private fun DeviceRow(d: TvDevice, state: UiState, actions: DeviceActions) {
 }
 
 @Composable
-fun PairingDialog(pairing: PairingUi, onSubmit: (String) -> Unit, onCancel: () -> Unit) {
+fun PairingDialog(pairing: PairingUi, onSubmit: (String) -> Unit, onCancel: () -> Unit, onRetry: () -> Unit) {
+    if (pairing.device.isFireTv) {
+        FireTvPairingDialog(pairing, onCancel, onRetry)
+        return
+    }
     var code by rememberSaveable(pairing.device.id) { mutableStateOf("") }
     val focus = remember { FocusRequester() }
     val ready = pairing.phase == PairingUi.Phase.ENTER_CODE
@@ -334,6 +368,37 @@ fun PairingDialog(pairing: PairingUi, onSubmit: (String) -> Unit, onCancel: () -
                     Text("Pair")
                 }
             }
+        },
+        dismissButton = { TextButton(onClick = onCancel) { Text("Cancel") } },
+    )
+}
+
+/** Fire TV pairing: the user accepts "Allow USB debugging?" on the TV. */
+@Composable
+private fun FireTvPairingDialog(pairing: PairingUi, onCancel: () -> Unit, onRetry: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = {},
+        title = { Text("Pair with ${pairing.device.name}") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text("1. On the Fire TV, turn on Settings → My Fire TV → Developer options → ADB debugging.")
+                Text("2. When \u201cAllow USB debugging?\u201d appears on the TV, tick \u201cAlways allow from this computer\u201d and choose Allow.")
+                if (pairing.error == null) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+                        Spacer(Modifier.width(10.dp))
+                        Text(
+                            if (pairing.phase == PairingUi.Phase.APPROVE) "Waiting for you to allow Kalimote on the TV…" else "Connecting to the Fire TV…",
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                } else {
+                    Text(pairing.error, color = MaterialTheme.colorScheme.error)
+                }
+            }
+        },
+        confirmButton = {
+            if (pairing.error != null) Button(onClick = onRetry) { Text("Try again") }
         },
         dismissButton = { TextButton(onClick = onCancel) { Text("Cancel") } },
     )

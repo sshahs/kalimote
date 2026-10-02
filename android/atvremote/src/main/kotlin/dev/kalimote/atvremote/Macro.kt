@@ -127,7 +127,7 @@ object Macro {
      * Runs steps on [client], blocking the calling thread (use a background
      * thread). Stops early when [cancelled] returns true.
      */
-    fun run(client: RemoteClient, steps: List<MacroStep>, cancelled: () -> Boolean = { false }) {
+    fun run(client: TvClient, steps: List<MacroStep>, cancelled: () -> Boolean = { false }) {
         fun pause(ms: Long) {
             val end = System.currentTimeMillis() + ms
             while (System.currentTimeMillis() < end) {
