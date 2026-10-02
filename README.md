@@ -4,9 +4,9 @@
 
 # Kalimote
 
-**The remote for your Android TV and Google TV, in your browser and on your phone.**
+**The remote for your Google TV, Android TV and Amazon Fire TV, in your browser and on your phone.**
 
-Pair once with the code on your TV screen. No developer mode, no ADB, nothing to install on the TV.
+Pair once with the code on your TV screen (Fire TV: one tap on an *Allow* prompt). Nothing to install on the TV.
 
 [![CI](https://github.com/sshahs/kalimote/actions/workflows/ci.yml/badge.svg)](https://github.com/sshahs/kalimote/actions/workflows/ci.yml)
 [![Latest release](https://img.shields.io/github/v/release/sshahs/kalimote?label=release&color=5b8cff)](https://github.com/sshahs/kalimote/releases/latest)
@@ -20,6 +20,7 @@ Pair once with the code on your TV screen. No developer mode, no ADB, nothing to
 [Features](#-features) ·
 [Macros](#-macros) ·
 [Jellyfin](#-jellyfin) ·
+[Fire TV](#-amazon-fire-tv) ·
 [REST API](#-rest-api--home-automation) ·
 [FAQ](#-troubleshooting)
 
@@ -37,8 +38,10 @@ Pair once with the code on your TV screen. No developer mode, no ADB, nothing to
 
 |  | | Web | Android |
 | --- | --- | :---: | :---: |
+| 📺 | **Google TV / Android TV** (Sony, TCL, Hisense, Philips, Chromecast with Google TV, Nvidia Shield, …) | ✅ | ✅ |
+| 🔥 | **Amazon Fire TV** (Fire TV Stick, Cube, Fire TV smart TVs) over ADB | ✅ | ✅ |
 | 🔎 | **Auto-discovery** of TVs on your network (mDNS), or add by IP | ✅ | ✅ |
-| 🔐 | **Secure pairing** with the 6-character code shown on the TV | ✅ | ✅ |
+| 🔐 | **Secure pairing** with the code shown on the TV (Fire TV: approve the on-screen prompt) | ✅ | ✅ |
 | 🎮 | **D-pad** with press-and-hold repeat, or a swipe **touchpad** | ✅ | ✅ |
 | 🔊 | **Volume and channel** rockers with the TV's live volume level, plus a **volume slider** | ✅ | ✅ |
 | ⏯️ | Media keys, number pad, colour buttons, captions, guide, input, settings, Assistant | ✅ | ✅ |
@@ -197,6 +200,19 @@ Kalimote finds the TV's Jellyfin session by IP address. On the web remote the AP
 
 <br clear="right">
 
+## 🔥 Amazon Fire TV
+
+Fire OS has no Google services, so Fire TV can't use the Google TV remote protocol. Kalimote controls it over **ADB**, the debugging interface Fire TV has built in. Home Assistant's Fire TV integration uses the same approach.
+
+1. On the Fire TV: **Settings → My Fire TV → Developer options → ADB debugging → On**.
+   No *Developer options*? Open **Settings → My Fire TV → About** and click your device name 7 times.
+2. In Kalimote, add the TV as **Amazon Fire TV**. It's also found automatically on your network.
+3. A prompt **"Allow USB debugging?"** appears on the TV. Tick **Always allow from this computer** and choose **Allow**.
+
+Everything works the same way as on Google TV: D-pad, keys, long press, text, apps and links, power with real on/off state, current app, macros, sleep timer, widgets and Jellyfin mode. Fire TV doesn't report its volume level, so the volume slider is hidden; volume buttons still work through HDMI-CEC.
+
+> ADB debugging lets any trusted computer control the device. Kalimote only gets access after you tap *Allow*, and you can revoke it under *Developer options → Revoke USB debugging authorisations*.
+
 ## 🏠 REST API & home automation
 
 The web server exposes a small JSON API, so Home Assistant, iOS Shortcuts, Tasker or a shell script can drive your TV. `:device` is the device id **or its name**.
@@ -257,11 +273,14 @@ flowchart LR
     H["🏠 Home Assistant<br/>Shortcuts · curl"]
   end
   S["Kalimote server<br/>Node.js"]
-  TV["📺 Android TV /<br/>Google TV"]
+  TV["📺 Google TV /<br/>Android TV"]
+  FT["🔥 Fire TV"]
   B -- WebSocket --> S
   H -- REST API --> S
   S -- "TLS :6467 pairing<br/>TLS :6466 control" --> TV
-  A -- "TLS :6467 / :6466<br/>(direct)" --> TV
+  S -- "ADB :5555" --> FT
+  A -- "TLS :6467 / :6466" --> TV
+  A -- "ADB :5555" --> FT
 ```
 
 Browsers can't open raw TLS sockets, so the web remote goes through a small Node.js server on your network. The Android app talks to the TV directly.
@@ -272,6 +291,7 @@ Browsers can't open raw TLS sockets, so the web remote goes through a small Node
 | Android app | [`android/app`](android/app) | Kotlin + Jetpack Compose + Material 3 |
 | Protocol library | [`android/atvremote`](android/atvremote) | Pure Kotlin/JVM, no Android or protobuf dependencies |
 | Mock TV | [`server/test/mock-tv.js`](server/test/mock-tv.js) | Implements the TV side, used by both test suites |
+| Mock Fire TV | [`server/test/mock-firetv.js`](server/test/mock-firetv.js) | Implements adbd (incl. RSA auth and the approval prompt), used by both test suites |
 | Mock Jellyfin | [`server/test/mock-jellyfin.js`](server/test/mock-jellyfin.js) | Fake Jellyfin API with a shared session fixture, used by both test suites |
 
 <details>
@@ -320,6 +340,12 @@ Verify a download with `apksigner verify --print-certs kalimote-x.y.z.apk`. If t
 </details>
 
 ## ❓ Troubleshooting
+
+<details>
+<summary><b>Fire TV: "Cannot reach …:5555" or nothing happens</b></summary>
+
+Make sure **ADB debugging** is on (*Settings → My Fire TV → Developer options*); it can turn itself off after a Fire OS update. If you missed the *Allow* prompt, choose **Try again** to show it again. A Fire TV in deep sleep may drop off the network; press a button on its own remote to wake it.
+</details>
 
 <details>
 <summary><b>My TV isn't found</b></summary>
