@@ -56,6 +56,10 @@ class RemoteClient(
     @Volatile
     private var running = false
 
+    /** Bumped by stop(), so a loop thread from before a restart exits quietly. */
+    @Volatile
+    private var generation = 0
+
     @Volatile
     private var socket: SSLSocket? = null
     private var thread: Thread? = null
@@ -68,7 +72,8 @@ class RemoteClient(
     override fun start() {
         if (running) return
         running = true
-        thread = Thread(::loop, "atvremote-$host").apply {
+        val gen = generation
+        thread = Thread({ loop(gen) }, "atvremote-$host").apply {
             isDaemon = true
             start()
         }
@@ -86,10 +91,8 @@ class RemoteClient(
     @Synchronized
     override fun stop() {
         running = false
-        try {
-            socket?.close()
-        } catch (_: IOException) {
-        }
+        generation++
+        Sockets.closeInBackground(socket)
         synchronized(lock) { lock.notifyAll() }
         thread = null
         update { it.copy(status = RemoteState.Status.DISCONNECTED) }
@@ -132,9 +135,10 @@ class RemoteClient(
         }
     }
 
-    private fun loop() {
+    private fun loop(gen: Int) {
+        fun active() = running && generation == gen
         var backoff = 1000L
-        while (running) {
+        while (active()) {
             update { it.copy(status = RemoteState.Status.CONNECTING) }
             var gotMessage = false
             var handshaken = false
@@ -143,16 +147,16 @@ class RemoteClient(
                 val s = identity.connect(host, port, 10_000)
                 current = s
                 handshaken = true
+                if (!active()) break
                 socket = s
-                if (!running) break
                 s.soTimeout = 20_000 // the TV pings every few seconds
-                while (running) {
+                while (active()) {
                     val msg = ProtoMessage(Framing.read(s.inputStream))
                     gotMessage = true
                     if (handle(msg)) backoff = 1000L
                 }
             } catch (e: Exception) {
-                if (!running) break
+                if (!active()) break
                 // The TV hangs up right after the handshake (or fails it with a
                 // certificate alert) when it does not recognise our certificate.
                 val unpaired = !gotMessage && (handshaken || e is SSLException) &&
@@ -180,11 +184,11 @@ class RemoteClient(
                 }
                 if (socket === current) socket = null
             }
-            if (!running) break
+            if (!active()) break
             synchronized(lock) { lock.wait(backoff) }
             backoff = (backoff * 2).coerceAtMost(30_000L)
         }
-        if (state.status != RemoteState.Status.UNPAIRED) {
+        if (generation == gen && state.status != RemoteState.Status.UNPAIRED) {
             update { it.copy(status = RemoteState.Status.DISCONNECTED) }
         }
     }

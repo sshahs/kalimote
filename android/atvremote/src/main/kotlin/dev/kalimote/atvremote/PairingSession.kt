@@ -70,12 +70,7 @@ class PairingSession(
         return msg
     }
 
-    override fun close() {
-        try {
-            socket?.close()
-        } catch (_: IOException) {
-        }
-    }
+    override fun close() = Sockets.closeInBackground(socket)
 
     companion object {
         const val PAIRING_PORT = 6467

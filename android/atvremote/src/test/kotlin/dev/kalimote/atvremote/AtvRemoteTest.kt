@@ -124,6 +124,19 @@ class AtvRemoteTest {
             client.await { it.volume?.level == 10 }
             client.sendKey(KeyCodes.POWER)
             client.await { it.powered == false }
+
+            // App backgrounded and reopened quickly (onStop → onStart): the old
+            // connection closes in the background and must not be mistaken
+            // for the TV rejecting us, nor leave two connection loops.
+            repeat(3) {
+                client.stop()
+                client.start()
+            }
+            client.await { it.connected }
+            Thread.sleep(500)
+            check(client.state.connected) { "Lost the connection after restart: ${client.state}" }
+            client.sendKey(KeyCodes.DPAD_DOWN)
+            expect(Regex("key 20 dir 3"))
             client.shutdown()
         } finally {
             process.destroy()
