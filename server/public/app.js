@@ -385,7 +385,7 @@ function renderManage() {
       ...state.discovered.map((d) =>
         li(
           d.name,
-          `${d.type === 'firetv' ? 'Amazon Fire TV · ' : ''}${d.host}`,
+          `${d.type === 'firetv' ? 'Fire TV / ADB · ' : ''}${d.host}`,
           null,
           button('Add', async () => {
             try {

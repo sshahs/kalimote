@@ -122,7 +122,7 @@ fun DevicesScreen(state: UiState, actions: DeviceActions, modifier: Modifier = M
                 Column(Modifier.weight(1f)) {
                     Text(tv.name, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     Text(
-                        (if (tv.type == TvDevice.TYPE_FIRE_TV) "Amazon Fire TV · " else "") + tv.host,
+                        (if (tv.type == TvDevice.TYPE_FIRE_TV) "Fire TV / ADB · " else "") + tv.host,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         fontSize = 13.sp,
                     )
@@ -157,13 +157,15 @@ fun DevicesScreen(state: UiState, actions: DeviceActions, modifier: Modifier = M
             FilterChip(
                 selected = type == TvDevice.TYPE_FIRE_TV,
                 onClick = { type = TvDevice.TYPE_FIRE_TV },
-                label = { Text("Amazon Fire TV") },
+                label = { Text("Fire TV / other Android (ADB)") },
             )
         }
         if (type == TvDevice.TYPE_FIRE_TV) {
             Text(
                 "On the Fire TV, turn on Settings → My Fire TV → Developer options → ADB debugging. " +
-                    "No Developer options? Open About and click your device name 7 times.",
+                    "No Developer options? Open About and click your device name 7 times. " +
+                    "Other Android TV boxes (e.g. LineageOS on a Raspberry Pi): turn on ADB over network in Developer options. " +
+                    "ADB types any text and adds screenshots, installed apps and APK install.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -253,7 +255,7 @@ private fun DeviceRow(d: TvDevice, state: UiState, actions: DeviceActions) {
         Column(Modifier.weight(1f)) {
             Text(d.name, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
             Text(
-                (if (d.isFireTv) "Fire TV · " else "") + "${d.host} · $status",
+                (if (d.isFireTv) "ADB · " else "") + "${d.host} · $status",
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 fontSize = 13.sp,
             )

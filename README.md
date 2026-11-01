@@ -230,6 +230,8 @@ Fire TV also gets a few extras that ADB makes possible:
 - **Screenshot** shows what's on the TV, with a *Live* option that refreshes every 2 seconds (some DRM video shows as black)
 - **Install APK** uploads an APK from your computer (web) or phone (Android) and installs it, with progress
 
+**Other Android TV boxes** work the same way over ADB, for example LineageOS Android TV on a Raspberry Pi: turn on *ADB over network* in *Developer options*, then add the box as *Fire TV / other Android (ADB)*. This is also the better choice when a box's Google remote service doesn't accept typed text: over ADB, text is typed exactly as written.
+
 > ADB debugging lets any trusted computer control the device. Kalimote only gets access after you tap *Allow*, and you can revoke it under *Developer options → Revoke USB debugging authorisations*.
 
 ## 🏠 REST API & home automation

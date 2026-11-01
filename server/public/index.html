@@ -204,13 +204,15 @@
       <input name="name" placeholder="Name (optional)" autocomplete="off">
       <select name="type" aria-label="Device type">
         <option value="androidtv">Google TV / Android TV</option>
-        <option value="firetv">Amazon Fire TV</option>
+        <option value="firetv">Fire TV / other Android (ADB)</option>
       </select>
       <button class="primary">Add</button>
     </form>
     <p class="hint"><b>Google TV / Android TV:</b> works out of the box with the code shown on screen.
       <b>Fire TV:</b> turn on <i>Settings → My Fire TV → Developer options → ADB debugging</i> first
-      (no Developer options? open <i>About</i> and click your device name 7 times). The TV and this server must be on the same network.</p>
+      (no Developer options? open <i>About</i> and click your device name 7 times).
+      <b>Other Android TV boxes</b> (e.g. LineageOS on a Raspberry Pi): turn on <i>ADB over network</i> in Developer options and add as ADB.
+      The TV and this server must be on the same network.</p>
   </dialog>
 
   <dialog id="pair-dialog">
