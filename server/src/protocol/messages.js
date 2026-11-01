@@ -102,15 +102,17 @@ export const Direction = { START_LONG: 1, END_LONG: 2, SHORT: 3 };
 
 // Feature bitmask advertised in RemoteConfigure / RemoteSetActive:
 // KEY | IME | VOICE | POWER | VOLUME | APP_LINK
-export const FEATURES = 622;
+// KEY | IME | POWER | VOLUME | APP_LINK. Not VOICE: we don't stream audio.
+export const FEATURES = 614;
+export const FEATURE_IME = 4;
 
 const remote = (field, body) => new Writer().message(field, body).finish();
 
 export const remoteMsg = {
-  configure: ({ model = 'Kalimote', vendor = 'Kalimote', appVersion = '1.0.0' } = {}) =>
+  configure: ({ model = 'Kalimote', vendor = 'Kalimote', appVersion = '1.0.0' } = {}, features = FEATURES) =>
     remote(
       Remote.CONFIGURE,
-      new Writer().varint(1, FEATURES).message(
+      new Writer().varint(1, features).message(
         2,
         new Writer()
           .string(1, model)
@@ -121,7 +123,7 @@ export const remoteMsg = {
           .string(6, appVersion),
       ),
     ),
-  setActive: () => remote(Remote.SET_ACTIVE, new Writer().varint(1, FEATURES)),
+  setActive: (features = FEATURES) => remote(Remote.SET_ACTIVE, new Writer().varint(1, features)),
   pingResponse: (val1) => remote(Remote.PING_RESPONSE, new Writer().varint(1, val1)),
   key: (keyCode, direction = Direction.SHORT) =>
     remote(Remote.KEY_INJECT, new Writer().varint(1, keyCode).varint(2, direction)),

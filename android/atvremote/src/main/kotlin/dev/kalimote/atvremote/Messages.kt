@@ -54,14 +54,15 @@ internal object Remote {
     const val SET_VOLUME_LEVEL = 50
     const val APP_LINK_LAUNCH = 90
 
-    /** KEY | IME | VOICE | POWER | VOLUME | APP_LINK feature bits. */
-    const val FEATURES = 622
+    /** KEY | IME | POWER | VOLUME | APP_LINK feature bits. Not VOICE: we don't stream audio. */
+    const val FEATURES = 614
+    const val FEATURE_IME = 4
 
     private fun remote(field: Int, body: ProtoWriter) = ProtoWriter().message(field, body).toByteArray()
 
-    fun configure(info: DeviceInfo) = remote(
+    fun configure(info: DeviceInfo, features: Int = FEATURES) = remote(
         CONFIGURE,
-        ProtoWriter().varint(1, FEATURES).message(
+        ProtoWriter().varint(1, features).message(
             2,
             ProtoWriter()
                 .string(1, info.model)
@@ -73,7 +74,7 @@ internal object Remote {
         ),
     )
 
-    fun setActive() = remote(SET_ACTIVE, ProtoWriter().varint(1, FEATURES))
+    fun setActive(features: Int = FEATURES) = remote(SET_ACTIVE, ProtoWriter().varint(1, features))
 
     fun pingResponse(value: Long) = remote(PING_RESPONSE, ProtoWriter().varint(1, value))
 
@@ -153,5 +154,30 @@ object KeyCodes {
     fun digit(n: Int): Int {
         require(n in 0..9)
         return DIGIT_0 + n
+    }
+}
+
+/**
+ * Typing with plain key presses, for TVs that don't take text through the
+ * remote's input method. Key events carry no Shift, so letters come out in
+ * lower case and only characters with their own key can be typed.
+ */
+object KeyTyping {
+    private val CODES: Map<Char, Int> = buildMap {
+        ('a'..'z').forEachIndexed { i, c -> put(c, 29 + i) }
+        ('0'..'9').forEachIndexed { i, c -> put(c, 7 + i) }
+        put(' ', 62); put(',', 55); put('.', 56); put('`', 68); put('-', 69); put('=', 70)
+        put('[', 71); put(']', 72); put('\\', 73); put(';', 74); put('\'', 75); put('/', 76)
+        put('@', 77); put('+', 81); put('*', 17); put('#', 18)
+    }
+
+    /** What the TV ends up with when [text] is typed: lower case, untypeable characters dropped. */
+    fun typeable(text: String): String = text.lowercase().filter { it in CODES }
+
+    /** Key codes turning a text box holding typeable [old] into typeable [new]. */
+    fun edit(old: String, new: String): List<Int> {
+        var p = 0
+        while (p < old.length && p < new.length && old[p] == new[p]) p++
+        return List(old.length - p) { KeyCodes.DEL } + new.substring(p).map { CODES.getValue(it) }
     }
 }

@@ -51,6 +51,14 @@ fun KalimoteApp(vm: RemoteViewModel) {
     var showDevices by rememberSaveable { mutableStateOf(state.devices.isEmpty()) }
     val snackbar = remember { SnackbarHostState() }
     var showJellyfinSettings by rememberSaveable { mutableStateOf(false) }
+    var typing by rememberSaveable { mutableStateOf(false) }
+
+    // Pop the typing bar up when the TV focuses a text box (e.g. a search field).
+    val fieldId = state.remote.textField?.id
+    LaunchedEffect(fieldId) {
+        if (fieldId != null && !showDevices && vm.claimKeyboard(fieldId)) typing = true
+    }
+    BackHandler(enabled = typing && !showDevices) { typing = false }
 
     val view = LocalView.current
     DisposableEffect(state.keepScreenOn) {
@@ -70,6 +78,19 @@ fun KalimoteApp(vm: RemoteViewModel) {
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
         snackbarHost = { SnackbarHost(snackbar) },
+        bottomBar = {
+            if (typing && !showDevices) {
+                TypingBar(
+                    field = state.remote.textField,
+                    connected = state.remote.connected,
+                    fireTv = state.selected?.isFireTv == true,
+                    onChange = vm::setText,
+                    onReset = vm::resetText,
+                    onKey = { vm.sendKey(it) },
+                    onClose = { typing = false },
+                )
+            }
+        },
         topBar = {
             TopAppBar(
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background),
@@ -142,9 +163,7 @@ fun KalimoteApp(vm: RemoteViewModel) {
                     runMacro = vm::runMacro,
                     stopMacro = vm::stopMacro,
                     toast = vm::toast,
-                    setText = vm::setText,
-                    resetText = vm::resetText,
-                    claimKeyboard = vm::claimKeyboard,
+                    openKeyboard = { typing = true },
                     jellyfin = JellyfinActions(
                         key = { vm.sendKey(it) },
                         control = vm::jellyfinControl,

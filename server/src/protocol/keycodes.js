@@ -51,6 +51,22 @@ export const KeyCode = {
   WAKEUP: 224,
 };
 
+// Typing with plain key presses, for TVs that don't take text through the
+// remote's input method. Key events carry no Shift, so letters come out in
+// lower case and only characters with their own key can be typed.
+const TYPING = new Map([
+  ...[...'abcdefghijklmnopqrstuvwxyz'].map((c, i) => [c, 29 + i]),
+  ...[...'0123456789'].map((c, i) => [c, 7 + i]),
+  [' ', 62], [',', 55], ['.', 56], ['`', 68], ['-', 69], ['=', 70], ['[', 71], [']', 72],
+  ['\\', 73], [';', 74], ["'", 75], ['/', 76], ['@', 77], ['+', 81], ['*', 17], ['#', 18],
+]);
+
+/** What the TV ends up with when `text` is typed as keys. */
+export const typeable = (text) => [...String(text).toLowerCase()].filter((c) => TYPING.has(c)).join('');
+
+/** Key codes that type `text` as key presses (untypeable characters skipped). */
+export const typingKeys = (text) => [...typeable(text)].map((c) => TYPING.get(c));
+
 /** Accepts a key name ("DPAD_UP", "KEYCODE_DPAD_UP") or a numeric code. */
 export function resolveKey(key) {
   if (typeof key === 'number' && Number.isInteger(key) && key > 0) return key;

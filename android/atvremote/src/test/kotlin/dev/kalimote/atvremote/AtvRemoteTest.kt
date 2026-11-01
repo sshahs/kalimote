@@ -115,8 +115,14 @@ class AtvRemoteTest {
             expect(Regex("key 19 dir 3"))
             client.sendKey(KeyCodes.VOLUME_UP)
             client.await { it.volume?.level == 11 }
+            // No text box reported by the TV: text goes as key presses (h e l l o).
             client.sendText("hello")
-            expect(Regex("text \"hello\""))
+            listOf(36, 33, 40, 40, 43).forEach { expect(Regex("^key $it dir 3$")) }
+            client.resetText()
+            client.setText("Hi!") // lower case, untypeable characters dropped
+            listOf(36, 37).forEach { expect(Regex("^key $it dir 3$")) }
+            client.setText("Hey you")
+            listOf(67, 33, 53, 62, 53, 43, 49).forEach { expect(Regex("^key $it dir 3$")) }
             client.launchApp("https://www.youtube.com")
             client.await { it.currentApp == "https://www.youtube.com" }
             Macro.run(client, Macro.parse("DPAD_LEFT x2, VOLUME_DOWN"))

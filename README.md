@@ -46,7 +46,7 @@ Pair once with the code on your TV screen (Fire TV: one tap on an *Allow* prompt
 | 🔊 | **Volume and channel** rockers with the TV's live volume level, plus a **volume slider** | ✅ | ✅ |
 | ⏯️ | Media keys, number pad, colour buttons, captions, guide, input, settings, Assistant | ✅ | ✅ |
 | ⌨️ | **Type text** into search boxes on the TV | ✅ | ✅ |
-| ⌨️ | **Live keyboard**: the TV's text box mirrors what you type, pops up when the TV asks for text, with arrows to pick suggestions | | ✅ |
+| ⌨️ | **Live keyboard**: a typing bar above your phone's keyboard; text appears on the TV as you type, and it pops up when the TV asks for text | | ✅ |
 | 🚀 | **One-tap app shortcuts** (YouTube, Netflix, Prime Video, Disney+, …), customisable | ✅ | ✅ |
 | 📋 | **App picker**: every app installed on a Fire TV, or a catalog of popular apps on Google TV | ✅ | ✅ |
 | 🔗 | **Open any link on the TV**: paste a YouTube or Netflix URL | ✅ | ✅ |

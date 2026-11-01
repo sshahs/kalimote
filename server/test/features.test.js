@@ -98,8 +98,9 @@ test('REST API: auth, lookup by name, key, text, open', async () => {
   assert.equal((await api('POST', '/api/devices/den%20tv/key', { key: 'HOME' })).body.ok, true);
   await waitFor(() => tv.keys.some((k) => k.code === 3));
 
+  // No text box reported by the TV, so the text is typed as key presses (a b c).
   await api('POST', `/api/devices/${deviceId}/text`, { text: 'abc' });
-  await waitFor(() => tv.texts.includes('abc'));
+  await waitFor(() => tv.keys.map((k) => k.code).join(',').includes('29,30,31'));
   await api('POST', `/api/devices/${deviceId}/open`, { url: 'https://www.youtube.com' });
   await waitFor(() => tv.links.includes('https://www.youtube.com'));
 

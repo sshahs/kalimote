@@ -57,7 +57,6 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -99,10 +98,7 @@ class RemoteActions(
     val runMacro: (String, String) -> String?,
     val stopMacro: () -> Unit,
     val toast: (String) -> Unit,
-    val setText: (String) -> Unit,
-    val resetText: () -> Unit,
-    /** True once per text box the TV asks to fill, when auto-opening is on. */
-    val claimKeyboard: (Int) -> Boolean,
+    val openKeyboard: () -> Unit,
     val jellyfin: JellyfinActions,
     val listApps: suspend () -> Pair<Boolean, List<TvApp>>,
     val launchPackage: (TvApp) -> Unit,
@@ -113,7 +109,6 @@ class RemoteActions(
 @Composable
 fun RemoteScreen(state: UiState, actions: RemoteActions, modifier: Modifier = Modifier) {
     val key = { code: Int -> actions.key(code, Direction.SHORT) }
-    var showKeyboard by rememberSaveable { mutableStateOf(false) }
     var showMore by rememberSaveable { mutableStateOf(false) }
     var showAddApp by rememberSaveable { mutableStateOf(false) }
     var showAppPicker by rememberSaveable { mutableStateOf(false) }
@@ -199,7 +194,7 @@ fun RemoteScreen(state: UiState, actions: RemoteActions, modifier: Modifier = Mo
                 )
                 Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
                     RemoteButton("Mute", Modifier.size(58.dp), icon = Icons.AutoMirrored.Filled.VolumeOff) { key(KeyCodes.VOLUME_MUTE) }
-                    RemoteButton("Keyboard", Modifier.size(58.dp), icon = Icons.Filled.Keyboard) { showKeyboard = true }
+                    RemoteButton("Keyboard", Modifier.size(58.dp), icon = Icons.Filled.Keyboard) { actions.openKeyboard() }
                 }
                 Rocker(
                     label = "CH",
@@ -262,21 +257,6 @@ fun RemoteScreen(state: UiState, actions: RemoteActions, modifier: Modifier = Mo
         )
     }
 
-    // Pop the keyboard up when the TV focuses a text box (e.g. a search field).
-    val fieldId = state.remote.textField?.id
-    LaunchedEffect(fieldId) {
-        if (fieldId != null && actions.claimKeyboard(fieldId)) showKeyboard = true
-    }
-    if (showKeyboard) {
-        KeyboardSheet(
-            field = state.remote.textField,
-            connected = connected,
-            onChange = actions.setText,
-            onReset = actions.resetText,
-            onKey = key,
-            onDismiss = { showKeyboard = false },
-        )
-    }
     if (showAppPicker) {
         AppPickerDialog(
             load = actions.listApps,

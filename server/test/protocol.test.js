@@ -101,9 +101,23 @@ test('pair, connect, and control', async () => {
   await waitFor((s) => s.powered === false);
   assert.deepEqual(tv.keys.slice(0, 1), [{ code: 19, direction: 3 }]);
 
+  // No text box reported by the TV: text goes as key presses.
+  const until = async (pred) => {
+    for (let i = 0; i < 200 && !pred(); i++) await new Promise((r) => setTimeout(r, 10));
+    assert.ok(pred(), 'timed out');
+  };
+  const before = tv.keys.length;
+  remote.sendText('Hi!');
+  await until(() => tv.keys.length >= before + 2);
+  assert.deepEqual(tv.keys.slice(before).map((k) => k.code), [36, 37]);
+
+  // The TV focuses a text box: text goes through its input method and adds up.
+  tv.showKeyboard('Search');
+  await until(() => remote.imeValue === '');
   remote.sendText('hello');
-  const [text] = await once(tv, 'text');
-  assert.equal(text, 'hello');
+  assert.equal((await once(tv, 'text'))[0], 'hello');
+  remote.sendText(' world');
+  assert.equal((await once(tv, 'text'))[0], 'hello world');
 
   remote.launchApp('https://www.netflix.com/title');
   await waitFor((s) => s.currentApp === 'https://www.netflix.com/title');

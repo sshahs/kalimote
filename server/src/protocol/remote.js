@@ -1,8 +1,8 @@
 import tls from 'node:tls';
 import { EventEmitter } from 'node:events';
 import { FrameReader, frame } from './proto.js';
-import { remoteMsg, parseRemote, Direction } from './messages.js';
-import { resolveKey } from './keycodes.js';
+import { remoteMsg, parseRemote, Direction, FEATURES, FEATURE_IME } from './messages.js';
+import { resolveKey, typingKeys } from './keycodes.js';
 
 export const REMOTE_PORT = 6466;
 
@@ -26,6 +26,10 @@ export class RemoteConnection extends EventEmitter {
     };
     this.imeCounter = 0;
     this.fieldCounter = 0;
+    this.features = FEATURES;
+    // Text box the TV told us about (input method); null: type as key presses.
+    this.imeValue = null;
+    this.lastSent = null;
     this.stopped = true;
     this.retryMs = 1000;
   }
@@ -127,11 +131,16 @@ export class RemoteConnection extends EventEmitter {
     // The TV pings every ~5s; any traffic resets our idle timer.
     socket.setTimeout(20000);
     switch (kind) {
-      case 'CONFIGURE':
-        this.send(remoteMsg.configure(this.deviceInfo));
+      case 'CONFIGURE': {
+        // Agree on the features both sides support, as the official remote does.
+        const tv = body.uint(1);
+        this.features = tv > 0 ? FEATURES & tv : FEATURES;
+        this.imeValue = null;
+        this.send(remoteMsg.configure(this.deviceInfo, this.features));
         break;
+      }
       case 'SET_ACTIVE':
-        this.send(remoteMsg.setActive());
+        this.send(remoteMsg.setActive(this.features));
         if (!this.state.connected) {
           this.update({ connected: true });
           return true;
@@ -150,16 +159,25 @@ export class RemoteConnection extends EventEmitter {
         break;
       case 'IME_KEY_INJECT': {
         const app = body.message(1)?.string(12);
+        if (app && app !== this.state.currentApp) this.imeValue = null;
         if (app) this.update({ currentApp: app });
         break;
       }
-      case 'IME_BATCH_EDIT':
+      case 'IME_BATCH_EDIT': {
         this.imeCounter = body.int(1);
         this.fieldCounter = body.int(2);
+        const status = body.message(3)?.message(2);
+        const value = status?.has(3) ? status.string(3) : null;
+        if (value !== null && value === this.lastSent) this.lastSent = null;
+        else if (value !== null && this.lastSent === null) this.imeValue = value; // the TV reporting its text box
         break;
+      }
       case 'IME_SHOW_REQUEST': {
         const field = body.message(2);
-        if (field) this.fieldCounter = field.int(1);
+        if (field) {
+          this.fieldCounter = field.int(1);
+          this.imeValue = field.string(2);
+        }
         break;
       }
       case 'ERROR':
@@ -194,10 +212,23 @@ export class RemoteConnection extends EventEmitter {
     this.send(remoteMsg.key(resolveKey(key), dir));
   }
 
+  /**
+   * Types text at the cursor. When the TV has told us about its text box, it
+   * goes through the input method (a batch edit replaces the box's content,
+   * so we send what it holds plus the new text). Many TVs never do, and then
+   * it is typed as key presses: lower case, characters with their own key.
+   */
   sendText(text) {
     this.ensureConnected();
     if (!text) return;
-    this.send(remoteMsg.imeBatchEdit(this.imeCounter, this.fieldCounter, String(text)));
+    if (this.imeValue !== null && this.features & FEATURE_IME) {
+      const value = this.imeValue + String(text);
+      this.imeValue = value;
+      this.lastSent = value;
+      this.send(remoteMsg.imeBatchEdit(this.imeCounter, this.fieldCounter, value));
+      return;
+    }
+    for (const code of typingKeys(text)) this.send(remoteMsg.key(code, Direction.SHORT));
   }
 
   launchApp(url) {

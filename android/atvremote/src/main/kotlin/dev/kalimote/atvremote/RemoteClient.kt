@@ -97,6 +97,14 @@ class RemoteClient(
     @Volatile
     private var lastSentAt = 0L
 
+    /** Features agreed with the TV: ours that it also supports. */
+    @Volatile
+    private var features = Remote.FEATURES
+
+    // Key-press typing (no text box reported by the TV): what it holds as far as we know.
+    private val textLock = Object()
+    private var typedKeys = ""
+
     @Synchronized
     override fun start() {
         if (running) return
@@ -136,15 +144,37 @@ class RemoteClient(
 
     override fun sendText(text: String) {
         if (text.isEmpty()) return
-        setText((state.textField?.value ?: "") + text)
+        val field = state.textField
+        if (field != null) {
+            setText(field.value + text)
+        } else {
+            KeyTyping.edit("", KeyTyping.typeable(text)).forEach { sendKey(it) }
+        }
     }
 
-    // The protocol's batch edit replaces the whole content of the text box.
+    /**
+     * When the TV has told us about its text box, edits go through the input
+     * method (the batch edit replaces the box's whole content). Many TVs never
+     * do (e.g. Android TV builds whose remote service doesn't support it), and
+     * then the text is typed as key presses, which every TV accepts.
+     */
     override fun setText(text: String) {
-        lastSent = text
-        lastSentAt = System.currentTimeMillis()
-        send(Remote.imeBatchEdit(imeCounter, fieldCounter, text))
-        update { s -> s.textField?.let { s.copy(textField = it.copy(value = text)) } ?: s }
+        if (state.textField != null && features and Remote.FEATURE_IME != 0) {
+            lastSent = text
+            lastSentAt = System.currentTimeMillis()
+            send(Remote.imeBatchEdit(imeCounter, fieldCounter, text))
+            update { s -> s.textField?.let { s.copy(textField = it.copy(value = text)) } ?: s }
+            return
+        }
+        val target = KeyTyping.typeable(text)
+        val keys = synchronized(textLock) {
+            KeyTyping.edit(typedKeys, target).also { typedKeys = target }
+        }
+        keys.forEach { sendKey(it) }
+    }
+
+    override fun resetText() = synchronized(textLock) {
+        typedKeys = ""
     }
 
     override fun launchApp(url: String) = send(Remote.appLink(url))
@@ -233,9 +263,14 @@ class RemoteClient(
     /** Returns true when the connection just became active. */
     private fun handle(msg: ProtoMessage): Boolean {
         when {
-            msg.has(Remote.CONFIGURE) -> send(Remote.configure(deviceInfo))
+            msg.has(Remote.CONFIGURE) -> {
+                // Agree on the features both sides support, as the official remote does.
+                val tv = msg.message(Remote.CONFIGURE)?.int(1) ?: 0
+                features = if (tv > 0) Remote.FEATURES and tv else Remote.FEATURES
+                send(Remote.configure(deviceInfo, features))
+            }
             msg.has(Remote.SET_ACTIVE) -> {
-                send(Remote.setActive())
+                send(Remote.setActive(features))
                 if (!state.connected) {
                     update { it.copy(status = RemoteState.Status.CONNECTED, error = null) }
                     return true
@@ -264,9 +299,14 @@ class RemoteClient(
                 val value = m.message(3)?.message(2)?.takeIf { it.has(3) }?.string(3)
                 val pending = lastSent
                 val stale = pending != null && value != pending && System.currentTimeMillis() - lastSentAt < 1500
-                if (value == pending) lastSent = null
+                val echo = pending != null && value == pending
+                if (echo) lastSent = null
                 if (value != null && !stale) {
-                    update { s -> s.textField?.let { s.copy(textField = it.copy(value = value)) } ?: s }
+                    // Not an echo of ours: the TV is telling us about its text box.
+                    update { s ->
+                        val field = s.textField ?: if (echo) null else TextField(++fieldSeq, value)
+                        s.copy(textField = field?.copy(value = value))
+                    }
                 }
             }
             msg.has(Remote.IME_SHOW_REQUEST) -> {

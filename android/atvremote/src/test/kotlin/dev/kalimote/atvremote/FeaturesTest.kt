@@ -49,4 +49,15 @@ class FeaturesTest {
         assertTrue(p.take(6).all { it == 0xff.toByte() })
         assertEquals(listOf(0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff), p.takeLast(6).map { it.toInt() and 0xff })
     }
+
+    @Test
+    fun keyTyping() {
+        // Lower case, and characters without their own key ('%', '!') are dropped.
+        assertEquals("it's 50 off, ok", KeyTyping.typeable("It's 50% OFF, ok!"))
+        assertEquals(listOf(36, 37), KeyTyping.edit("", "hi"))
+        assertEquals(listOf(KeyCodes.DEL, KeyCodes.DEL), KeyTyping.edit("hey", "h"))
+        assertEquals(listOf(KeyCodes.DEL, 41), KeyTyping.edit("ab", "am"))
+        assertEquals(emptyList(), KeyTyping.edit("same", "same"))
+        assertEquals(listOf(7, 16, 62, 77, 56), KeyTyping.edit("", "09 @."))
+    }
 }
