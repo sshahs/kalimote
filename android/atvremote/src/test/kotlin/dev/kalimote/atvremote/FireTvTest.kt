@@ -80,6 +80,14 @@ class FireTvTest {
             "am start -a android.intent.action.VIEW -d 'https://youtu.be/x?a=1&b='\\''2'\\'''",
             FireTvCommands.launch("https://youtu.be/x?a=1&b='2'"),
         )
+        assertEquals(true, FireTvCommands.inputShown("mShowRequested=true mShowExplicitlyRequested=false mInputShown=true"))
+        assertEquals(false, FireTvCommands.inputShown("  mInputShown=false"))
+        assertNull(FireTvCommands.inputShown("nothing"))
+        // Live edits: delete back to the common prefix, then type the rest, in one call.
+        assertEquals("input text 'hello'", FireTvCommands.edit("", "hello"))
+        assertEquals("input keyevent 67 67", FireTvCommands.edit("hello", "hel"))
+        assertEquals("input keyevent 67 67 ; input text 'p%sme'", FireTvCommands.edit("hello", "help me"))
+        assertNull(FireTvCommands.edit("same", "same"))
         assertNull(FireTvCommands.key(23, Direction.END_LONG))
         assertEquals("input keyevent --longpress 23", FireTvCommands.key(23, Direction.START_LONG))
     }
@@ -162,6 +170,25 @@ class FireTvTest {
             expect(Regex("installed apk ${apk.size} bytes"))
             assertTrue(progress.count { it > 0 } >= 5)
             assertEquals(-1L, progress.last())
+
+            // Live keyboard: the TV's keyboard comes up, fast typing is coalesced.
+            client.sendKey(KeyCodes.SEARCH)
+            client.await { it.textField != null }
+            val field = client.state.textField!!.id
+            "the matrix".forEachIndexed { i, _ -> client.setText("the matrix".substring(0, i + 1)) }
+            expect(Regex("^field \"the matrix\"$"))
+            client.setText("the mat")
+            client.setText("the martian")
+            expect(Regex("^field \"the martian\"$"))
+            client.sendText("!") // macros and shares add at the cursor
+            expect(Regex("^field \"the martian!\"$"))
+            client.sendKey(KeyCodes.ENTER)
+            expect(Regex("^submit \"the martian!\"$"))
+            client.await { it.textField == null }
+            client.sendKey(KeyCodes.SEARCH) // the next text box starts empty
+            client.await { it.textField != null && it.textField?.id != field && it.textField?.value == "" }
+            client.setText("up")
+            expect(Regex("^field \"up\"$"))
 
             client.sendKey(KeyCodes.POWER)
             client.await { it.powered == false }

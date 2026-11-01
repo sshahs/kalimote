@@ -76,6 +76,7 @@ data class UiState(
     val message: String? = null,
     val install: InstallUi? = null,
     val mediaControls: Boolean = false,
+    val autoKeyboard: Boolean = true,
 ) {
     val selected: TvDevice? get() = devices.firstOrNull { it.id == selectedId }
 
@@ -98,6 +99,7 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
             volumeKeys = store.volumeKeys,
             keepScreenOn = store.keepScreenOn,
             mediaControls = store.mediaControls,
+            autoKeyboard = store.autoKeyboard,
             jellyfinUrl = store.jellyfinUrl,
             jellyfinConfigured = store.jellyfinUrl.isNotBlank() && store.jellyfinKey.isNotBlank(),
             macros = store.loadMacros(),
@@ -389,6 +391,30 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
 
     fun sendText(text: String) {
         if (isConnected) client?.sendText(text) else toast("TV is not connected")
+    }
+
+    /** Live typing: the TV's text box mirrors the phone's. */
+    fun setText(text: String) {
+        if (isConnected) client?.setText(text)
+    }
+
+    fun resetText() {
+        client?.resetText()
+    }
+
+    private var keyboardOpenedFor: String? = null
+
+    /** Whether to pop the keyboard up for this text box (once each, across screens). */
+    fun claimKeyboard(fieldId: Int): Boolean {
+        val key = "$clientDeviceId:$fieldId"
+        if (!_state.value.autoKeyboard || keyboardOpenedFor == key) return false
+        keyboardOpenedFor = key
+        return true
+    }
+
+    fun setAutoKeyboard(on: Boolean) {
+        store.autoKeyboard = on
+        _state.update { it.copy(autoKeyboard = on) }
     }
 
     fun launchApp(app: AppShortcut) {

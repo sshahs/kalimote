@@ -88,6 +88,8 @@ export class MockFireTv extends EventEmitter {
     this.keys = [];
     this.texts = [];
     this.awake = true;
+    this.inputShown = false; // the TV's on-screen keyboard
+    this.field = ''; // what the focused text box holds
     this.currentApp = LAUNCHER;
     this.pending = [];
     this.installed = [...INSTALLED];
@@ -227,6 +229,29 @@ export class MockFireTv extends EventEmitter {
     }
   }
 
+  onKey(key) {
+    this.keys.push(key);
+    if (key.code === 26) this.awake = !this.awake;
+    if (key.code === 223) this.awake = false;
+    if (key.code === 224) this.awake = true;
+    if (key.code === 3) this.currentApp = LAUNCHER;
+    if (key.code === 84) {
+      this.inputShown = true;
+      this.setField('');
+    } else if (key.code === 67 && this.inputShown) {
+      this.setField(this.field.slice(0, -1));
+    } else if (key.code === 66 && this.inputShown) {
+      this.inputShown = false;
+      this.emit('submit', this.field);
+    }
+    this.emit('key', key);
+  }
+
+  setField(value) {
+    this.field = value;
+    this.emit('field', value);
+  }
+
   exec(cmd) {
     this.commands.push(`exec:${cmd}`);
     if (cmd === 'screencap -p') return screenPng(this.screenshots++);
@@ -239,23 +264,24 @@ export class MockFireTv extends EventEmitter {
       return (
         `  mCurrentFocus=Window{1a2b3c u0 ${this.currentApp}/${this.currentApp}.MainActivity}\n` +
         `  mFocusedApp=ActivityRecord{4d5e6f u0 ${this.currentApp}/.MainActivity t12}\n` +
-        `  mWakefulness=${this.awake ? 'Awake' : 'Asleep'}\n  Display Power: state=${this.awake ? 'ON' : 'OFF'}\n`
+        `  mWakefulness=${this.awake ? 'Awake' : 'Asleep'}\n  Display Power: state=${this.awake ? 'ON' : 'OFF'}\n` +
+        `  mShowRequested=${this.inputShown} mShowExplicitlyRequested=false mShowForced=false mInputShown=${this.inputShown}\n`
       );
     }
     let m;
-    if ((m = /^input keyevent (--longpress )?(\d+)$/.exec(cmd))) {
-      const key = { code: Number(m[2]), long: !!m[1] };
-      this.keys.push(key);
-      if (key.code === 26) this.awake = !this.awake;
-      if (key.code === 223) this.awake = false;
-      if (key.code === 224) this.awake = true;
-      if (key.code === 3) this.currentApp = LAUNCHER;
-      this.emit('key', key);
+    // "input keyevent 67 67 ; input text 'abc'": several commands in one shell call.
+    if ((m = /^(input keyevent [\d ]+?) ; (input text .*)$/s.exec(cmd))) {
+      this.shell(m[1]);
+      return this.shell(m[2]);
+    }
+    if ((m = /^input keyevent (--longpress )?(\d+(?: \d+)*)$/.exec(cmd))) {
+      for (const code of m[2].split(' ').map(Number)) this.onKey({ code, long: !!m[1] });
       return '';
     }
     if ((m = /^input text '(.*)'$/s.exec(cmd))) {
       const text = m[1].replace(/'\\''/g, "'").replace(/%s/g, ' ').replace(/\\%/g, '%');
       this.texts.push(text);
+      if (this.inputShown) this.setField(this.field + text);
       this.emit('text', text);
       return '';
     }
@@ -303,6 +329,8 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   tv.on('approved', () => console.log('Debugging allowed'));
   tv.on('key', (k) => console.log(`key ${k.code}${k.long ? ' long' : ''}`));
   tv.on('text', (t) => console.log(`text "${t}"`));
+  tv.on('field', (t) => console.log(`field "${t}"`));
+  tv.on('submit', (t) => console.log(`submit "${t}"`));
   tv.on('launch', (a) => console.log(`launch ${a}`));
   tv.on('installed', (apk) => console.log(`installed apk ${apk.length} bytes`));
 }

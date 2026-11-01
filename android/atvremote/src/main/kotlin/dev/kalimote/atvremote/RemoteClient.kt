@@ -21,9 +21,26 @@ interface TvClient {
     fun shutdown()
     fun reconnectNow()
     fun sendKey(keyCode: Int, direction: Direction = Direction.SHORT)
+    /** Types [text] at the cursor of the TV's focused text box (macros, shared links). */
     fun sendText(text: String)
     fun launchApp(url: String)
+
+    /**
+     * Live typing: makes the TV's focused text box contain [text]. Call it on
+     * every edit; rapid calls are coalesced where the transport is slow.
+     */
+    fun setText(text: String)
+
+    /** Forgets what [setText] typed so far, before typing into a new text box. */
+    fun resetText() {}
 }
+
+/**
+ * A text box on the TV waiting for input (its on-screen keyboard is up).
+ * [id] changes each time the TV asks for text, [value] is what it contains
+ * as far as we know, and [label] is its hint ("Search YouTube"), if reported.
+ */
+data class TextField(val id: Int, val value: String = "", val label: String = "")
 
 data class RemoteState(
     val status: Status = Status.DISCONNECTED,
@@ -31,6 +48,7 @@ data class RemoteState(
     val currentApp: String? = null,
     val volume: Volume? = null,
     val error: String? = null,
+    val textField: TextField? = null,
 ) {
     enum class Status { DISCONNECTED, CONNECTING, CONNECTED, UNPAIRED }
 
@@ -65,8 +83,19 @@ class RemoteClient(
     private var thread: Thread? = null
     private val writer = Executors.newSingleThreadExecutor { r -> Thread(r, "atvremote-writer").apply { isDaemon = true } }
     private val lock = Object()
+    private val stateLock = Object()
+    @Volatile
     private var imeCounter = 0
+    @Volatile
     private var fieldCounter = 0
+    private var fieldSeq = 0
+
+    // The TV echoes each edit back. While our latest edit is in flight, echoes
+    // of earlier ones are stale and must not overwrite what we typed.
+    @Volatile
+    private var lastSent: String? = null
+    @Volatile
+    private var lastSentAt = 0L
 
     @Synchronized
     override fun start() {
@@ -107,7 +136,15 @@ class RemoteClient(
 
     override fun sendText(text: String) {
         if (text.isEmpty()) return
+        setText((state.textField?.value ?: "") + text)
+    }
+
+    // The protocol's batch edit replaces the whole content of the text box.
+    override fun setText(text: String) {
+        lastSent = text
+        lastSentAt = System.currentTimeMillis()
         send(Remote.imeBatchEdit(imeCounter, fieldCounter, text))
+        update { s -> s.textField?.let { s.copy(textField = it.copy(value = text)) } ?: s }
     }
 
     override fun launchApp(url: String) = send(Remote.appLink(url))
@@ -127,7 +164,7 @@ class RemoteClient(
         }
     }
 
-    private fun update(change: (RemoteState) -> RemoteState) {
+    private fun update(change: (RemoteState) -> RemoteState) = synchronized(stateLock) {
         val next = change(state)
         if (next != state) {
             state = next
@@ -139,7 +176,7 @@ class RemoteClient(
         fun active() = running && generation == gen
         var backoff = 1000L
         while (active()) {
-            update { it.copy(status = RemoteState.Status.CONNECTING) }
+            update { it.copy(status = RemoteState.Status.CONNECTING, textField = null) }
             var gotMessage = false
             var handshaken = false
             var current: SSLSocket? = null
@@ -215,15 +252,29 @@ class RemoteClient(
             }
             msg.has(Remote.IME_KEY_INJECT) -> {
                 val app = msg.message(Remote.IME_KEY_INJECT)?.message(1)?.string(12)
-                if (!app.isNullOrEmpty()) update { it.copy(currentApp = app) }
+                // A different app has no text box waiting for us any more.
+                if (!app.isNullOrEmpty()) {
+                    update { if (it.currentApp == app) it else it.copy(currentApp = app, textField = null) }
+                }
             }
             msg.has(Remote.IME_BATCH_EDIT) -> {
                 val m = msg.message(Remote.IME_BATCH_EDIT) ?: return false
                 imeCounter = m.int(1)
                 fieldCounter = m.int(2)
+                val value = m.message(3)?.message(2)?.takeIf { it.has(3) }?.string(3)
+                val pending = lastSent
+                val stale = pending != null && value != pending && System.currentTimeMillis() - lastSentAt < 1500
+                if (value == pending) lastSent = null
+                if (value != null && !stale) {
+                    update { s -> s.textField?.let { s.copy(textField = it.copy(value = value)) } ?: s }
+                }
             }
             msg.has(Remote.IME_SHOW_REQUEST) -> {
-                msg.message(Remote.IME_SHOW_REQUEST)?.message(2)?.let { fieldCounter = it.int(1) }
+                // The TV focused a text box and wants text: counter, value, hint.
+                val f = msg.message(Remote.IME_SHOW_REQUEST)?.message(2) ?: return false
+                fieldCounter = f.int(1)
+                val field = TextField(++fieldSeq, f.string(2), f.string(6))
+                update { it.copy(textField = field) }
             }
         }
         return false

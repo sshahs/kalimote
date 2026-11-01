@@ -122,6 +122,29 @@ class AtvRemoteTest {
             Macro.run(client, Macro.parse("DPAD_LEFT x2, VOLUME_DOWN"))
             expect(Regex("key 21 dir 3"))
             client.await { it.volume?.level == 10 }
+
+            // Live keyboard: the TV asks for text and we mirror every edit into its box.
+            client.sendKey(KeyCodes.SEARCH)
+            expect(Regex("keyboard \"Search\""))
+            client.await { it.textField?.label == "Search" && it.textField?.value == "" }
+            val field = client.state.textField!!.id
+            client.setText("h")
+            client.setText("hel")
+            client.setText("hello")
+            expect(Regex("text \"hello\""))
+            client.sendText(" world") // macros and shares add at the cursor
+            expect(Regex("text \"hello world\""))
+            client.sendKey(KeyCodes.DEL) // edited on the TV side: the echo keeps us in sync
+            client.await { it.textField?.value == "hello worl" }
+            client.setText("")
+            expect(Regex("text \"\""))
+            client.setText("news")
+            client.sendKey(KeyCodes.ENTER)
+            expect(Regex("submit \"news\""))
+            assertEquals(field, client.state.textField?.id)
+            client.sendKey(KeyCodes.SEARCH) // a new text box starts a new session
+            client.await { it.textField != null && it.textField?.id != field && it.textField?.value == "" }
+
             client.sendKey(KeyCodes.POWER)
             client.await { it.powered == false }
 

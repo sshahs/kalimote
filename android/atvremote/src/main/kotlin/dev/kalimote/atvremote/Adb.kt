@@ -391,7 +391,8 @@ class AdbConnection(
 /** Shell commands and output parsing for Fire TV; same as server/src/adb/firetv.js. */
 object FireTvCommands {
     const val STATUS =
-        "dumpsys window windows | grep -E 'mCurrentFocus|mFocusedApp' ; dumpsys power | grep -E 'mWakefulness=|Display Power: state='"
+        "dumpsys window windows | grep -E 'mCurrentFocus|mFocusedApp' ; dumpsys power | grep -E 'mWakefulness=|Display Power: state=' ; " +
+            "dumpsys input_method | grep -E 'mInputShown='"
 
     fun shQuote(s: String) = "'" + s.replace("'", "'\\''") + "'"
 
@@ -404,6 +405,26 @@ object FireTvCommands {
         } else {
             "am start -a android.intent.action.VIEW -d ${shQuote(url)}"
         }
+    }
+
+    /** Whether the TV's on-screen keyboard is up (null if unknown). */
+    fun inputShown(out: String): Boolean? =
+        Regex("mInputShown=(true|false)").find(out)?.groupValues?.get(1)?.toBoolean()
+
+    /**
+     * One shell command turning a text box holding [old] into [new]: delete
+     * back to the common prefix (several key codes in one `input keyevent`),
+     * then type the rest. Null when there is nothing to do.
+     */
+    fun edit(old: String, new: String): String? {
+        var p = 0
+        while (p < old.length && p < new.length && old[p] == new[p]) p++
+        val parts = mutableListOf<String>()
+        val deletes = old.length - p
+        if (deletes > 0) parts += "input keyevent " + List(deletes) { KeyCodes.DEL }.joinToString(" ")
+        val add = new.substring(p)
+        if (add.isNotEmpty()) parts += inputText(add)
+        return if (parts.isEmpty()) null else parts.joinToString(" ; ")
     }
 
     fun currentApp(out: String): String? =
@@ -457,11 +478,21 @@ class FireTvClient(
     @Volatile
     private var conn: AdbConnection? = null
     private val lock = Object()
+    private val stateLock = Object()
+
+    // Live typing: what we believe the focused text box holds, and what the
+    // user wants it to hold. A single pass on the command thread applies the
+    // difference, so fast typing becomes one command instead of a backlog.
+    private val textLock = Object()
+    private var typed = ""
+    private var wanted: String? = null
+    private var applying = false
+    private var fieldSeq = 0
     private val commands = java.util.concurrent.Executors.newSingleThreadExecutor { r ->
         Thread(r, "firetv-commands").apply { isDaemon = true }
     }
 
-    private fun update(change: (RemoteState) -> RemoteState) {
+    private fun update(change: (RemoteState) -> RemoteState) = synchronized(stateLock) {
         val next = change(state)
         if (next != state) {
             state = next
@@ -495,7 +526,23 @@ class FireTvClient(
 
     private fun poll(c: AdbConnection) {
         val out = c.shell(FireTvCommands.STATUS, 5000)
-        update { it.copy(currentApp = FireTvCommands.currentApp(out) ?: it.currentApp, powered = FireTvCommands.powered(out)) }
+        val field = when (FireTvCommands.inputShown(out)) {
+            // Keyboard came up: a text box holding whatever we already typed into it.
+            true -> state.textField ?: TextField(++fieldSeq, synchronized(textLock) { wanted ?: typed })
+            // Keyboard went away: the next text box starts empty.
+            false -> {
+                if (state.textField != null) resetText()
+                null
+            }
+            null -> state.textField
+        }
+        update {
+            it.copy(
+                currentApp = FireTvCommands.currentApp(out) ?: it.currentApp,
+                powered = FireTvCommands.powered(out),
+                textField = field?.let { f -> it.textField?.takeIf { t -> t.id == f.id } ?: f },
+            )
+        }
     }
 
     private fun loop() {
@@ -549,7 +596,52 @@ class FireTvClient(
     }
 
     override fun sendText(text: String) {
-        if (text.isNotEmpty()) run(FireTvCommands.inputText(text))
+        if (text.isEmpty()) return
+        // Into a text box we are live-typing in: extend it. Otherwise just type.
+        if (state.textField == null) {
+            run(FireTvCommands.inputText(text))
+        } else {
+            setText(synchronized(textLock) { wanted ?: typed } + text)
+        }
+    }
+
+    override fun setText(text: String) {
+        val start = synchronized(textLock) {
+            wanted = text
+            !applying.also { applying = true }
+        }
+        if (start && !commands.isShutdown) commands.execute(::applyText)
+        update { s -> s.textField?.let { s.copy(textField = it.copy(value = text)) } ?: s }
+    }
+
+    override fun resetText() = synchronized(textLock) {
+        typed = ""
+        wanted = null
+    }
+
+    private fun applyText() {
+        while (true) {
+            val (from, to) = synchronized(textLock) {
+                val to = wanted
+                if (to == null || to == typed) {
+                    applying = false
+                    return
+                }
+                typed to to
+            }
+            val c = conn
+            val command = FireTvCommands.edit(from, to)
+            val ok = c != null && command != null && runCatching { c.shell(command, 10_000) }.isSuccess
+            synchronized(textLock) {
+                if (!ok) {
+                    applying = false
+                    wanted = null
+                    return
+                }
+                // A reset while the command ran means a new text box: keep it empty.
+                if (typed == from) typed = to
+            }
+        }
     }
 
     override fun launchApp(url: String) = run(FireTvCommands.launch(url))

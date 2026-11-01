@@ -1,10 +1,5 @@
 package dev.kalimote.app.ui
 
-import android.content.ActivityNotFoundException
-import android.content.Intent
-import android.speech.RecognizerIntent
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
@@ -29,13 +24,9 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.KeyboardActions
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.automirrored.filled.Backspace
-import androidx.compose.material.icons.automirrored.filled.KeyboardReturn
 import androidx.compose.material.icons.automirrored.filled.VolumeOff
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ExpandLess
@@ -76,11 +67,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.focus.FocusRequester
-import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -111,6 +99,10 @@ class RemoteActions(
     val runMacro: (String, String) -> String?,
     val stopMacro: () -> Unit,
     val toast: (String) -> Unit,
+    val setText: (String) -> Unit,
+    val resetText: () -> Unit,
+    /** True once per text box the TV asks to fill, when auto-opening is on. */
+    val claimKeyboard: (Int) -> Boolean,
     val jellyfin: JellyfinActions,
     val listApps: suspend () -> Pair<Boolean, List<TvApp>>,
     val launchPackage: (TvApp) -> Unit,
@@ -270,7 +262,21 @@ fun RemoteScreen(state: UiState, actions: RemoteActions, modifier: Modifier = Mo
         )
     }
 
-    if (showKeyboard) KeyboardDialog(onDismiss = { showKeyboard = false }, onText = actions.text, onKey = key)
+    // Pop the keyboard up when the TV focuses a text box (e.g. a search field).
+    val fieldId = state.remote.textField?.id
+    LaunchedEffect(fieldId) {
+        if (fieldId != null && actions.claimKeyboard(fieldId)) showKeyboard = true
+    }
+    if (showKeyboard) {
+        KeyboardSheet(
+            field = state.remote.textField,
+            connected = connected,
+            onChange = actions.setText,
+            onReset = actions.resetText,
+            onKey = key,
+            onDismiss = { showKeyboard = false },
+        )
+    }
     if (showAppPicker) {
         AppPickerDialog(
             load = actions.listApps,
@@ -479,66 +485,6 @@ private fun Apps(state: UiState, actions: RemoteActions, onAdd: () -> Unit, onLi
             dismissButton = { TextButton(onClick = { removing = null }) { Text("Cancel") } },
         )
     }
-}
-
-@Composable
-private fun KeyboardDialog(onDismiss: () -> Unit, onText: (String) -> Unit, onKey: (Int) -> Unit) {
-    var text by rememberSaveable { mutableStateOf("") }
-    var voiceError by remember { mutableStateOf<String?>(null) }
-    val focus = remember { FocusRequester() }
-    LaunchedEffect(Unit) { focus.requestFocus() }
-    val send = {
-        if (text.isNotEmpty()) {
-            onText(text)
-            text = ""
-        }
-    }
-    // Voice typing: the system speech recogniser fills in and sends the text.
-    val voice = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
-        val spoken = result.data?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)?.firstOrNull()
-        if (!spoken.isNullOrBlank()) {
-            text = spoken
-            send()
-        }
-    }
-    val listen = {
-        val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH)
-            .putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-            .putExtra(RecognizerIntent.EXTRA_PROMPT, "Say what to type on the TV")
-        try {
-            voice.launch(intent)
-            voiceError = null
-        } catch (_: ActivityNotFoundException) {
-            voiceError = "No speech recognition available on this phone"
-        }
-        Unit
-    }
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("Send text") },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("Focus a text field on the TV first (e.g. search).", style = MaterialTheme.typography.bodySmall)
-                OutlinedTextField(
-                    value = text,
-                    onValueChange = { text = it },
-                    singleLine = true,
-                    placeholder = { Text("Type here…") },
-                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
-                    keyboardActions = KeyboardActions(onSend = { send() }),
-                    modifier = Modifier.fillMaxWidth().focusRequester(focus),
-                )
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    RemoteButton("Delete", Modifier.size(56.dp, 40.dp), icon = Icons.AutoMirrored.Filled.Backspace, shape = RoundedCornerShape(12.dp), repeat = true) { onKey(KeyCodes.DEL) }
-                    RemoteButton("Enter", Modifier.size(56.dp, 40.dp), icon = Icons.AutoMirrored.Filled.KeyboardReturn, shape = RoundedCornerShape(12.dp)) { onKey(KeyCodes.ENTER) }
-                    RemoteButton("Voice typing", Modifier.size(56.dp, 40.dp), icon = Icons.Filled.Mic, shape = RoundedCornerShape(12.dp), container = Accent, content = Color.White) { listen() }
-                }
-                voiceError?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
-            }
-        },
-        confirmButton = { Button(onClick = send) { Text("Send") } },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Close") } },
-    )
 }
 
 @Composable

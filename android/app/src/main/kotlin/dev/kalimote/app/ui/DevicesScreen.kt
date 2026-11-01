@@ -74,6 +74,7 @@ class DeviceActions(
     val setVolumeKeys: (Boolean) -> Unit,
     val setKeepScreenOn: (Boolean) -> Unit,
     val setMediaControls: (Boolean) -> Unit,
+    val setAutoKeyboard: (Boolean) -> Unit,
     val exportBackup: () -> String,
     val importBackup: (String) -> String,
     val toast: (String) -> Unit,
@@ -199,6 +200,13 @@ fun DevicesScreen(state: UiState, actions: DeviceActions, modifier: Modifier = M
             Switch(checked = state.keepScreenOn, onCheckedChange = actions.setKeepScreenOn)
         }
 
+        Card(onClick = { actions.setAutoKeyboard(!state.autoKeyboard) }) {
+            Column(Modifier.weight(1f)) {
+                Text("Open the keyboard when the TV asks for text", fontWeight = FontWeight.SemiBold)
+                Text("When a search box is selected on the TV", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 13.sp)
+            }
+            Switch(checked = state.autoKeyboard, onCheckedChange = actions.setAutoKeyboard)
+        }
         MediaControlsCard(state.mediaControls, actions.setMediaControls)
 
         SectionTitle("Quick controls")

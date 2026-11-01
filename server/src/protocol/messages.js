@@ -153,6 +153,12 @@ export const remoteMsg = {
       Remote.SET_VOLUME_LEVEL,
       new Writer().string(3, playerModel).varint(6, max).varint(7, level).varint(8, muted),
     ),
+  // The TV focused a text box: its counter, current value and hint.
+  imeShowRequest: (fieldCounter, value = '', label = '') =>
+    remote(
+      Remote.IME_SHOW_REQUEST,
+      new Writer().message(2, new Writer().varint(1, fieldCounter).string(2, value).string(6, label)),
+    ),
   imeKeyInject: (appPackage, imeCounter = 0, fieldCounter = 0) =>
     remote(
       Remote.IME_KEY_INJECT,

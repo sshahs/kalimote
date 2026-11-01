@@ -112,6 +112,7 @@ fun KalimoteApp(vm: RemoteViewModel) {
                     setVolumeKeys = vm::setVolumeKeys,
                     setKeepScreenOn = vm::setKeepScreenOn,
                     setMediaControls = vm::setMediaControls,
+                    setAutoKeyboard = vm::setAutoKeyboard,
                     exportBackup = vm::exportBackup,
                     importBackup = vm::importBackup,
                     toast = vm::toast,
@@ -141,6 +142,9 @@ fun KalimoteApp(vm: RemoteViewModel) {
                     runMacro = vm::runMacro,
                     stopMacro = vm::stopMacro,
                     toast = vm::toast,
+                    setText = vm::setText,
+                    resetText = vm::resetText,
+                    claimKeyboard = vm::claimKeyboard,
                     jellyfin = JellyfinActions(
                         key = { vm.sendKey(it) },
                         control = vm::jellyfinControl,

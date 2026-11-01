@@ -125,6 +125,10 @@ class DeviceStore(context: Context) {
         set(value) = prefs.edit().putString("jellyfinKey", value).apply()
 
     /** Media controls in the notification shade / lock screen. */
+    var autoKeyboard: Boolean
+        get() = prefs.getBoolean("autoKeyboard", true)
+        set(value) = prefs.edit().putBoolean("autoKeyboard", value).apply()
+
     var mediaControls: Boolean
         get() = prefs.getBoolean("mediaControls", false)
         set(value) = prefs.edit().putBoolean("mediaControls", value).apply()

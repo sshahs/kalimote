@@ -20,6 +20,9 @@ export class MockTv extends EventEmitter {
     this.paired = new Set(); // fingerprints of paired client certs
     this.keys = []; // received { code, direction }
     this.texts = [];
+    this.field = null; // focused text box: { value, label }
+    this.imeCounter = 0;
+    this.fieldCounter = 0;
     this.links = [];
     this.powered = true;
     this.volume = { level: 10, max: 100, muted: false };
@@ -124,8 +127,13 @@ export class MockTv extends EventEmitter {
             break;
           }
           case 'IME_BATCH_EDIT': {
+            // A batch edit replaces the text box's content; the TV echoes it
+            // back with a new IME counter.
             const text = body.message(3)?.message(2)?.string(3) ?? '';
             this.texts.push(text);
+            if (this.field) this.field.value = text;
+            this.imeCounter++;
+            send(remoteMsg.imeBatchEdit(this.imeCounter, this.fieldCounter, text));
             this.emit('text', text);
             break;
           }
@@ -142,9 +150,26 @@ export class MockTv extends EventEmitter {
     send(remoteMsg.configure());
   }
 
+  /** Simulates a text box getting focus on the TV (its keyboard comes up). */
+  showKeyboard(label = 'Search', value = '') {
+    this.fieldCounter++;
+    this.field = { value, label };
+    for (const s of this.remoteSockets) s.write(frame(remoteMsg.imeShowRequest(this.fieldCounter, value, label)));
+    this.emit('keyboard', label);
+  }
+
   onKey({ code, direction }, send) {
     if (direction !== 3 && direction !== 1) return;
-    if (code === 26) {
+    if (code === 84) {
+      this.showKeyboard('Search');
+    } else if (code === 66 && this.field) {
+      this.emit('submit', this.field.value);
+      this.field = null;
+    } else if (code === 67 && this.field) {
+      this.field.value = this.field.value.slice(0, -1);
+      this.imeCounter++;
+      send(remoteMsg.imeBatchEdit(this.imeCounter, this.fieldCounter, this.field.value));
+    } else if (code === 26) {
       this.powered = !this.powered;
       send(remoteMsg.start(this.powered));
     } else if (code === 24 || code === 25) {
@@ -181,5 +206,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   tv.on('connected', () => console.log('Remote connected'));
   tv.on('key', (k) => console.log(`key ${k.code} dir ${k.direction}`));
   tv.on('text', (t) => console.log(`text "${t}"`));
+  tv.on('keyboard', (l) => console.log(`keyboard "${l}"`));
+  tv.on('submit', (t) => console.log(`submit "${t}"`));
   tv.on('link', (l) => console.log(`launch ${l}`));
 }
