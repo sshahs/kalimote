@@ -369,13 +369,14 @@ The version code is derived from the version (`1.2.3` → `10203`), so APKs from
 <details>
 <summary><b>🍵 Gitea mirror (act_runner)</b></summary>
 
-[`.gitea/workflows/android.yml`](.gitea/workflows/android.yml) builds the APK on Gitea Actions with [act_runner](https://docs.gitea.com/usage/actions/act-runner). Gitea uses `.gitea/workflows` and ignores `.github/workflows`, so the GitHub workflows don't run there.
+[`.gitea/workflows/android.yml`](.gitea/workflows/android.yml) builds the APK on Gitea Actions with [act_runner](https://docs.gitea.com/usage/actions/act-runner), on a pull mirror of this repository. Gitea uses `.gitea/workflows` and ignores `.github/workflows`, so the GitHub workflows don't run there.
 
-1. Create the mirror: **New Migration → GitHub**, the repository URL, tick **This repository will be a mirror**. Set a short **mirror interval** (e.g. `10m`) so new tags arrive quickly.
-2. In the repository's **Settings → Units**, enable **Actions**, and make sure an act_runner with the `ubuntu-latest` label is registered (the default labels are fine; the workflow installs Java, Node.js and the Android SDK itself).
-3. Under **Settings → Actions → Secrets**, add the same four signing secrets as on GitHub.
+1. **New Migration → GitHub**, the repository URL, tick **This repository will be a mirror**.
+2. In the mirror's **Settings**: enable **Actions**, and make sure an x86_64 act_runner with the `ubuntu-latest` label is registered (the stock `gitea/runner-images:ubuntu-latest` image works; the workflow installs Java, Node.js and the Android SDK).
+3. **Settings → Actions → Secrets**: the same four signing secrets as on GitHub.
+4. Optional, on GitHub: a `GITEA_SYNC_TOKEN` secret (Gitea token with `write:repository`) and a `GITEA_MIRROR` variable (the mirror's URL). The Release workflow then asks the mirror to sync as soon as it has released, instead of waiting for the mirror interval.
 
-Each sync of `main` builds the APK (downloadable from the run's artifacts). Each new `v*` tag, or a manual run with a version, also publishes a Gitea release with the signed APK and checksums. If your instance's automatic Actions token may not create releases, add a `RELEASE_TOKEN` secret with repository write access.
+Each sync of `main` builds the APK (a run artifact). Each `v*` tag, which always comes from GitHub since tags made on a pull mirror are deleted by its next sync, also publishes the Gitea release for that tag with the signed, fingerprint-checked APK. Re-running a tag's workflow republishes its release. If the release step reports HTTP 401/403, set the repository's Actions token permissions to permissive or add a `RELEASE_TOKEN` secret; for 413, raise your reverse proxy's upload limit.
 </details>
 
 ## ❓ Troubleshooting
