@@ -60,4 +60,10 @@ class FeaturesTest {
         assertEquals(emptyList(), KeyTyping.edit("same", "same"))
         assertEquals(listOf(7, 16, 62, 77, 56), KeyTyping.edit("", "09 @."))
     }
+
+    @Test
+    fun protoDump() {
+        val msg = ProtoMessage(Remote.imeBatchEdit(3, 1, "hi there"))
+        assertEquals("21{1=3 2=1 3{1=1 2{1=7 2=7 3=\"hi there\"}}}", msg.dump())
+    }
 }

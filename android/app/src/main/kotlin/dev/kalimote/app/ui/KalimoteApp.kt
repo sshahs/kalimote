@@ -88,6 +88,7 @@ fun KalimoteApp(vm: RemoteViewModel) {
                     onReset = vm::resetText,
                     onKey = { vm.sendKey(it) },
                     onClose = { typing = false },
+                    diagnostics = vm::keyboardLog,
                 )
             }
         },

@@ -33,6 +33,9 @@ interface TvClient {
 
     /** Forgets what [setText] typed so far, before typing into a new text box. */
     fun resetText() {}
+
+    /** Recent protocol events about text input, newest last, for troubleshooting. */
+    fun diagnostics(): List<String> = emptyList()
 }
 
 /**
@@ -105,6 +108,16 @@ class RemoteClient(
     private val textLock = Object()
     private var typedKeys = ""
 
+    private val log = ArrayDeque<String>()
+
+    private fun note(line: String) = synchronized(log) {
+        val t = java.time.LocalTime.now().withNano(0)
+        log.addLast("$t $line")
+        while (log.size > 200) log.removeFirst()
+    }
+
+    override fun diagnostics(): List<String> = synchronized(log) { log.toList() }
+
     @Synchronized
     override fun start() {
         if (running) return
@@ -140,7 +153,10 @@ class RemoteClient(
         writer.shutdown()
     }
 
-    override fun sendKey(keyCode: Int, direction: Direction) = send(Remote.key(keyCode, direction))
+    override fun sendKey(keyCode: Int, direction: Direction) {
+        if (direction != Direction.END_LONG) note("→ key $keyCode ${direction.name.lowercase()}")
+        send(Remote.key(keyCode, direction))
+    }
 
     override fun sendText(text: String) {
         if (text.isEmpty()) return
@@ -148,7 +164,9 @@ class RemoteClient(
         if (field != null) {
             setText(field.value + text)
         } else {
-            KeyTyping.edit("", KeyTyping.typeable(text)).forEach { sendKey(it) }
+            val keys = KeyTyping.edit("", KeyTyping.typeable(text))
+            note("→ text as keys $keys")
+            keys.forEach { sendKey(it) }
         }
     }
 
@@ -162,6 +180,7 @@ class RemoteClient(
         if (state.textField != null && features and Remote.FEATURE_IME != 0) {
             lastSent = text
             lastSentAt = System.currentTimeMillis()
+            note("→ batch edit ime=$imeCounter field=$fieldCounter \"$text\"")
             send(Remote.imeBatchEdit(imeCounter, fieldCounter, text))
             update { s -> s.textField?.let { s.copy(textField = it.copy(value = text)) } ?: s }
             return
@@ -170,6 +189,7 @@ class RemoteClient(
         val keys = synchronized(textLock) {
             KeyTyping.edit(typedKeys, target).also { typedKeys = target }
         }
+        note("→ keys $keys for \"$text\" (no text box reported; features=$features)")
         keys.forEach { sendKey(it) }
     }
 
@@ -262,6 +282,8 @@ class RemoteClient(
 
     /** Returns true when the connection just became active. */
     private fun handle(msg: ProtoMessage): Boolean {
+        // Everything but pings, to see what the TV says around text input.
+        if (!msg.has(Remote.PING_REQUEST)) note("← " + msg.dump())
         when {
             msg.has(Remote.CONFIGURE) -> {
                 // Agree on the features both sides support, as the official remote does.

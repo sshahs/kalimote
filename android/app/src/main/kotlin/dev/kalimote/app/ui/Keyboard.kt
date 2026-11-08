@@ -3,6 +3,17 @@ package dev.kalimote.app.ui
 import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.speech.RecognizerIntent
+import android.os.Build
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.selection.SelectionContainer
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.TextButton
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.font.FontFamily
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
@@ -24,6 +35,7 @@ import androidx.compose.material.icons.automirrored.filled.KeyboardReturn
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.KeyboardHide
 import androidx.compose.material.icons.filled.Mic
+import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -77,6 +89,7 @@ fun TypingBar(
     onReset: () -> Unit,
     onKey: (Int) -> Unit,
     onClose: () -> Unit,
+    diagnostics: () -> List<String> = { emptyList() },
 ) {
     fun at(text: String) = TextFieldValue(text, TextRange(text.length))
     var value by remember { mutableStateOf(at(field?.value.orEmpty())) }
@@ -115,6 +128,8 @@ fun TypingBar(
         }
     }
     var voiceError by remember { mutableStateOf<String?>(null) }
+    var showLog by remember { mutableStateOf(false) }
+    if (showLog) KeyboardLogDialog(diagnostics()) { showLog = false }
 
     Surface(
         color = MaterialTheme.colorScheme.surfaceContainerHigh,
@@ -133,7 +148,7 @@ fun TypingBar(
                         !connected -> "TV is not connected"
                         field != null -> "Typing into " + field.label.ifBlank { "the TV" }
                         fireTv -> "Typing on the TV"
-                        else -> "Typing on the TV · lower case, letters, digits and . , - @ /"
+                        else -> "Typing as key presses · if letters don't appear, tap ⓘ"
                     },
                     fontSize = 12.sp,
                     color = if (voiceError != null) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
@@ -141,6 +156,9 @@ fun TypingBar(
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f).padding(start = 8.dp),
                 )
+                IconButton(onClick = { showLog = true }, modifier = Modifier.size(36.dp)) {
+                    Icon(Icons.Outlined.Info, "Keyboard log", Modifier.size(20.dp))
+                }
                 IconButton(onClick = onClose, modifier = Modifier.size(36.dp)) {
                     Icon(Icons.Filled.KeyboardHide, "Close keyboard", Modifier.size(20.dp))
                 }
@@ -195,4 +213,49 @@ fun TypingBar(
             }
         }
     }
+}
+
+/**
+ * What the TV said and what we sent while typing, to find out why text doesn't
+ * arrive on a particular TV. Copy or share it into a bug report.
+ */
+@Composable
+private fun KeyboardLogDialog(lines: List<String>, onDismiss: () -> Unit) {
+    val context = LocalContext.current
+    val clipboard = LocalClipboardManager.current
+    val text = buildString {
+        appendLine("Kalimote keyboard log (${Build.MANUFACTURER} ${Build.MODEL} → TV)")
+        appendLine("← from the TV, → to the TV")
+        if (lines.isEmpty()) appendLine("(nothing yet: connect, select a text box on the TV and type)")
+        lines.forEach { appendLine(it) }
+    }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Keyboard log") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(
+                    "Select a text box on the TV, type a few letters and digits here, press ⏎, then share this log.",
+                    style = MaterialTheme.typography.bodySmall,
+                )
+                SelectionContainer(Modifier.heightIn(max = 320.dp).verticalScroll(rememberScrollState())) {
+                    Text(text, fontSize = 11.sp, fontFamily = FontFamily.Monospace)
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = {
+                val send = Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, text)
+                context.startActivity(Intent.createChooser(send, "Share keyboard log"))
+            }) { Text("Share") }
+        },
+        dismissButton = {
+            Row {
+                TextButton(onClick = {
+                    clipboard.setText(AnnotatedString(text))
+                }) { Text("Copy") }
+                TextButton(onClick = onDismiss) { Text("Close") }
+            }
+        },
+    )
 }

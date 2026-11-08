@@ -402,6 +402,9 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
         client?.resetText()
     }
 
+    /** What the TV said and what we sent around text input, for troubleshooting. */
+    fun keyboardLog(): List<String> = client?.diagnostics().orEmpty()
+
     private var keyboardOpenedFor: String? = null
 
     /** Whether to pop the keyboard up for this text box (once each, across screens). */

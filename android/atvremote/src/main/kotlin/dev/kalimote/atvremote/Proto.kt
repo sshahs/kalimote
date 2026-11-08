@@ -97,6 +97,27 @@ class ProtoMessage(bytes: ByteArray) {
         bytes(field)?.toString(Charsets.UTF_8) ?: default
 
     fun message(field: Int): ProtoMessage? = bytes(field)?.let { ProtoMessage(it) }
+
+    /** Readable dump for diagnostics, e.g. `21{1=3 2=1 3{1=1 2{3="hi"}}}`. */
+    fun dump(depth: Int = 0): String = fields.keys.sorted().joinToString(" ") { f ->
+        fields.getValue(f).joinToString(" ") { v ->
+            when (v) {
+                is Long -> "$f=$v"
+                is ByteArray -> {
+                    val text = v.toString(Charsets.UTF_8)
+                    val printable = v.isNotEmpty() && text.all { it == ' ' || !it.isISOControl() } && '\uFFFD' !in text
+                    val nested = if (depth < 5 && v.isNotEmpty()) runCatching { ProtoMessage(v).dump(depth + 1) }.getOrNull() else null
+                    when {
+                        printable && (nested == null || text.length > 1 && text.all { it.isLetterOrDigit() || it in " ._-/:@" }) -> "$f=\"$text\""
+                        nested != null -> "$f{$nested}"
+                        v.isEmpty() -> "$f=\"\""
+                        else -> "$f=<${v.size} bytes>"
+                    }
+                }
+                else -> "$f=?"
+            }
+        }
+    }
 }
 
 class ProtocolException(message: String) : java.io.IOException(message)

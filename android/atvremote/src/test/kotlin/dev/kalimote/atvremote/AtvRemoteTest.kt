@@ -148,6 +148,11 @@ class AtvRemoteTest {
             client.sendKey(KeyCodes.ENTER)
             expect(Regex("submit \"news\""))
             assertEquals(field, client.state.textField?.id)
+            // The keyboard log shows what the TV said and what we sent.
+            val log = client.diagnostics().joinToString("\n")
+            assertTrue(log.contains("← 22{2{1="), log) // show request
+            assertTrue(log.contains("→ batch edit ime="), log)
+            assertTrue(log.contains("→ keys [36, 37] for \"Hi!\""), log)
             client.sendKey(KeyCodes.SEARCH) // a new text box starts a new session
             client.await { it.textField != null && it.textField?.id != field && it.textField?.value == "" }
 
