@@ -361,7 +361,21 @@ Release APKs are signed with the project's stable key, so each version installs 
 FB:E9:69:48:AB:5B:42:99:D6:F7:79:33:71:DD:6E:D2:43:C9:DD:8B:53:BE:E9:84:CA:12:99:5F:5F:70:13:8A
 ```
 
-Verify a download with `apksigner verify --print-certs kalimote-x.y.z.apk`. If the key is ever rotated, update `SIGNING_CERT_SHA256` in the workflow; users will then need to reinstall once.
+Verify a download with `apksigner verify --print-certs kalimote-x.y.z.apk`. If the key is ever rotated, update `SIGNING_CERT_SHA256` in the workflow (and in the Gitea one); users will then need to reinstall once.
+
+The version code is derived from the version (`1.2.3` → `10203`), so APKs from GitHub and from a Gitea mirror upgrade each other.
+</details>
+
+<details>
+<summary><b>🍵 Gitea mirror (act_runner)</b></summary>
+
+[`.gitea/workflows/android.yml`](.gitea/workflows/android.yml) builds the APK on Gitea Actions with [act_runner](https://docs.gitea.com/usage/actions/act-runner). Gitea uses `.gitea/workflows` and ignores `.github/workflows`, so the GitHub workflows don't run there.
+
+1. Create the mirror: **New Migration → GitHub**, the repository URL, tick **This repository will be a mirror**. Set a short **mirror interval** (e.g. `10m`) so new tags arrive quickly.
+2. In the repository's **Settings → Units**, enable **Actions**, and make sure an act_runner with the `ubuntu-latest` label is registered (the default labels are fine; the workflow installs Java, Node.js and the Android SDK itself).
+3. Under **Settings → Actions → Secrets**, add the same four signing secrets as on GitHub.
+
+Each sync of `main` builds the APK (downloadable from the run's artifacts). Each new `v*` tag, or a manual run with a version, also publishes a Gitea release with the signed APK and checksums. If your instance's automatic Actions token may not create releases, add a `RELEASE_TOKEN` secret with repository write access.
 </details>
 
 ## ❓ Troubleshooting

@@ -12,9 +12,17 @@ android {
         applicationId = "dev.kalimote.app"
         minSdk = 26
         targetSdk = 35
-        // CI passes these for releases: -Pkalimote.versionName=1.2.3 -Pkalimote.versionCode=42
-        versionCode = providers.gradleProperty("kalimote.versionCode").orNull?.toInt() ?: 1
-        versionName = providers.gradleProperty("kalimote.versionName").orNull ?: "0.1.0"
+        // Releases pass -Pkalimote.versionName=1.2.3. The version code comes from it
+        // (1.2.3 -> 10203), so APKs built by GitHub and Gitea upgrade each other.
+        val release = providers.gradleProperty("kalimote.versionName").orNull
+        versionCode = providers.gradleProperty("kalimote.versionCode").orNull?.toInt()
+            ?: release?.let { v ->
+                val (major, minor, patch) = (v.split('.').map { it.takeWhile(Char::isDigit).toIntOrNull() ?: 0 } + listOf(0, 0, 0)).take(3)
+                require(minor < 100 && patch < 100) { "Version $v: minor and patch must be below 100" }
+                major * 10000 + minor * 100 + patch
+            }
+            ?: 1
+        versionName = release ?: "0.1.0"
     }
 
     signingConfigs {
