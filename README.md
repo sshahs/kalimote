@@ -93,6 +93,8 @@ Pair once with the code on your TV screen (Fire TV: one tap on an *Allow* prompt
 2. Open Kalimote on the same Wi-Fi as your TV. Your TV appears under **Found on your network**.
 3. Tap **Pair** and type the code shown on the TV. Done.
 
+> **Upgrading from 0.7.x or older?** Releases from 0.8.0 on are signed with a new key, so Android won't install them over an older copy. Export your macros and app shortcuts (**TVs → Backup**), uninstall Kalimote, install the new version and import them again. This is needed only once.
+
 > **Tips:**
 > - In YouTube, Netflix or your browser, tap **Share → Open on TV** to play that link on the TV.
 > - Go to **TVs → Quick controls** to add the home-screen widget and Quick Settings tiles in one tap.
@@ -358,7 +360,7 @@ Push a tag (`git tag v1.2.3 && git push origin v1.2.3`), or run the **Release** 
 Release APKs are signed with the project's stable key, so each version installs over the previous one. The key lives in four repository secrets: `KEYSTORE_BASE64`, `KEYSTORE_PASSWORD`, `KEY_ALIAS` and `KEY_PASSWORD`. The workflow refuses to release without them. It also checks every APK against the certificate fingerprint pinned in [`release.yml`](.github/workflows/release.yml):
 
 ```
-FB:E9:69:48:AB:5B:42:99:D6:F7:79:33:71:DD:6E:D2:43:C9:DD:8B:53:BE:E9:84:CA:12:99:5F:5F:70:13:8A
+91:D2:7B:32:03:C4:64:C6:CF:7A:4F:AB:8A:F8:E1:2C:C4:8D:D7:D2:98:52:CA:90:65:76:3C:81:04:D1:1B:A1
 ```
 
 Verify a download with `apksigner verify --print-certs kalimote-x.y.z.apk`. If the key is ever rotated, update `SIGNING_CERT_SHA256` in the workflow (and in the Gitea one); users will then need to reinstall once.

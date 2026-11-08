@@ -39,7 +39,7 @@ permissions:
 env:
   # SHA-256 of the release signing certificate. Every release APK is checked
   # against it so users can always upgrade in place. Public; safe to commit.
-  SIGNING_CERT_SHA256: FB:E9:69:48:AB:5B:42:99:D6:F7:79:33:71:DD:6E:D2:43:C9:DD:8B:53:BE:E9:84:CA:12:99:5F:5F:70:13:8A
+  SIGNING_CERT_SHA256: 91:D2:7B:32:03:C4:64:C6:CF:7A:4F:AB:8A:F8:E1:2C:C4:8D:D7:D2:98:52:CA:90:65:76:3C:81:04:D1:1B:A1
   # Google's mirror of Maven Central: avoids Maven Central's per-IP rate limits (HTTP 429) on runners.
   KALIMOTE_MAVEN_MIRROR: https://maven-central.storage-download.googleapis.com/maven2/
   GRADLE_OPTS: -Dorg.gradle.daemon=false -Dorg.gradle.workers.max=4
