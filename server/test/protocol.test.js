@@ -113,7 +113,8 @@ test('pair, connect, and control', async () => {
 
   // The TV focuses a text box: text goes through its input method and adds up.
   tv.showKeyboard('Search');
-  await until(() => remote.imeValue === '');
+  // The text box is announced first, then the counters edits must carry.
+  await until(() => remote.imeValue === '' && remote.fieldCounter === tv.fieldCounter);
   remote.sendText('hello');
   assert.equal((await once(tv, 'text'))[0], 'hello');
   remote.sendText(' world');

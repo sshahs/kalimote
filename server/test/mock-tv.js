@@ -116,7 +116,8 @@ export class MockTv extends EventEmitter {
           case 'SET_ACTIVE':
             send(remoteMsg.start(this.powered));
             send(remoteMsg.volume(this.volume));
-            send(remoteMsg.imeKeyInject('com.google.android.tvlauncher', 1, 1));
+            this.app = 'com.google.android.tvlauncher';
+            send(remoteMsg.imeKeyInject(this.app));
             this.emit('connected');
             break;
           case 'KEY_INJECT': {
@@ -130,6 +131,11 @@ export class MockTv extends EventEmitter {
             // A batch edit replaces the text box's content; the TV echoes it
             // back with a new IME counter.
             const text = body.message(3)?.message(2)?.string(3) ?? '';
+            // Edits must carry the field counter of the current text box.
+            if (this.field && body.int(2) !== this.fieldCounter) {
+              this.emit('ignored', { text, ime: body.int(1), field: body.int(2) });
+              break;
+            }
             this.texts.push(text);
             if (this.field) this.field.value = text;
             this.imeCounter++;
@@ -139,7 +145,8 @@ export class MockTv extends EventEmitter {
           }
           case 'APP_LINK_LAUNCH':
             this.links.push(body.string(1));
-            send(remoteMsg.imeKeyInject(body.string(1), 1, 1));
+            this.app = body.string(1);
+            send(remoteMsg.imeKeyInject(this.app));
             this.emit('link', body.string(1));
             break;
           default:
@@ -150,11 +157,25 @@ export class MockTv extends EventEmitter {
     send(remoteMsg.configure());
   }
 
-  /** Simulates a text box getting focus on the TV (its keyboard comes up). */
-  showKeyboard(label = 'Search', value = '') {
-    this.fieldCounter++;
+  /**
+   * Simulates a text box getting focus on the TV. By default as the Android TV
+   * Remote Service does it (captured from a real device): an IME key inject
+   * with the text field status, then batch edits carrying only the counters.
+   * `showRequest: true` uses the IME show request some versions send instead.
+   */
+  showKeyboard(label = 'Search', value = '', { showRequest = false } = {}) {
     this.field = { value, label };
-    for (const s of this.remoteSockets) s.write(frame(remoteMsg.imeShowRequest(this.fieldCounter, value, label)));
+    const write = (m) => { for (const s of this.remoteSockets) s.write(frame(m)); };
+    this.imeCounter++;
+    if (showRequest) {
+      this.fieldCounter++;
+      write(remoteMsg.imeShowRequest(this.fieldCounter, value, label));
+    } else {
+      write(remoteMsg.imeKeyInject(this.app, { counter: 330 + this.imeCounter, value, label }));
+      write(remoteMsg.imeBatchEditCounters(this.imeCounter, this.fieldCounter));
+      this.fieldCounter++;
+      write(remoteMsg.imeBatchEditCounters(this.imeCounter, this.fieldCounter));
+    }
     this.emit('keyboard', label);
   }
 
@@ -208,5 +229,6 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   tv.on('text', (t) => console.log(`text "${t}"`));
   tv.on('keyboard', (l) => console.log(`keyboard "${l}"`));
   tv.on('submit', (t) => console.log(`submit "${t}"`));
+  tv.on('ignored', (e) => console.log(`ignored edit "${e.text}" with counters ${e.ime}/${e.field}`));
   tv.on('link', (l) => console.log(`launch ${l}`));
 }

@@ -132,7 +132,10 @@ class AtvRemoteTest {
             // Live keyboard: the TV asks for text and we mirror every edit into its box.
             client.sendKey(KeyCodes.SEARCH)
             expect(Regex("keyboard \"Search\""))
+            // As a real Android TV Remote Service does it: an IME key inject with the
+            // text field status, then batch edits carrying the counters for our edits.
             client.await { it.textField?.label == "Search" && it.textField?.value == "" }
+            Thread.sleep(300) // the counters follow the announcement within milliseconds
             val field = client.state.textField!!.id
             client.setText("h")
             client.setText("hel")
@@ -150,7 +153,7 @@ class AtvRemoteTest {
             assertEquals(field, client.state.textField?.id)
             // The keyboard log shows what the TV said and what we sent.
             val log = client.diagnostics().joinToString("\n")
-            assertTrue(log.contains("← 22{2{1="), log) // show request
+            assertTrue(log.contains("← 20{1{1=1 2=17"), log) // text box announced
             assertTrue(log.contains("→ batch edit ime="), log)
             assertTrue(log.contains("→ keys [36, 37] for \"Hi!\""), log)
             client.sendKey(KeyCodes.SEARCH) // a new text box starts a new session

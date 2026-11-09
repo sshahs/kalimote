@@ -155,19 +155,27 @@ export const remoteMsg = {
       Remote.SET_VOLUME_LEVEL,
       new Writer().string(3, playerModel).varint(6, max).varint(7, level).varint(8, muted),
     ),
+  // Counters only, as the TV sends them when a text box gets focus.
+  imeBatchEditCounters: (imeCounter, fieldCounter) =>
+    remote(Remote.IME_BATCH_EDIT, new Writer().varint(1, imeCounter).varint(2, fieldCounter)),
   // The TV focused a text box: its counter, current value and hint.
   imeShowRequest: (fieldCounter, value = '', label = '') =>
     remote(
       Remote.IME_SHOW_REQUEST,
       new Writer().message(2, new Writer().varint(1, fieldCounter).string(2, value).string(6, label)),
     ),
-  imeKeyInject: (appPackage, imeCounter = 0, fieldCounter = 0) =>
-    remote(
-      Remote.IME_KEY_INJECT,
-      new Writer()
-        .message(1, new Writer().varint(1, imeCounter).string(12, appPackage))
-        .message(2, new Writer().varint(1, fieldCounter)),
-    ),
+  // An app started taking input. Without `field` it only names the app (sent on
+  // app switches); with it a text box has focus, as the Android TV Remote
+  // Service reports it (captured from LineageOS ATV):
+  //   20{1{1=1 2=17 3=33554438 7=0 8=0 12="app" 13=-1} 2{1=331 2="" 3=0 4=0 5=1}}
+  imeKeyInject: (appPackage, field = null) => {
+    const w = new Writer();
+    if (!field) return remote(Remote.IME_KEY_INJECT, w.message(1, new Writer().string(12, appPackage)));
+    const app = new Writer().varint(1, 1).varint(2, 17).varint(3, 33554438).varint(7, 0).varint(8, 0).string(12, appPackage);
+    const status = new Writer().varint(1, field.counter).string(2, field.value ?? '').varint(3, 0).varint(4, 0).varint(5, 1);
+    if (field.label) status.string(6, field.label);
+    return remote(Remote.IME_KEY_INJECT, w.message(1, app).message(2, status));
+  },
 };
 
 export function parseRemote(buf) {

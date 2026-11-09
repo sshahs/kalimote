@@ -158,8 +158,12 @@ export class RemoteConnection extends EventEmitter {
         });
         break;
       case 'IME_KEY_INJECT': {
+        // With a text field status (field 2) a text box has focus: how the
+        // Android TV Remote Service announces it. The counters follow in batch edits.
         const app = body.message(1)?.string(12);
         if (app && app !== this.state.currentApp) this.imeValue = null;
+        const status = body.message(2);
+        if (status) this.imeValue = status.string(2);
         if (app) this.update({ currentApp: app });
         break;
       }
@@ -170,6 +174,7 @@ export class RemoteConnection extends EventEmitter {
         const value = status?.has(3) ? status.string(3) : null;
         if (value !== null && value === this.lastSent) this.lastSent = null;
         else if (value !== null && this.lastSent === null) this.imeValue = value; // the TV reporting its text box
+        else if (value === null && this.lastSent === null && this.imeValue === null) this.imeValue = ''; // an input session opened
         break;
       }
       case 'IME_SHOW_REQUEST': {

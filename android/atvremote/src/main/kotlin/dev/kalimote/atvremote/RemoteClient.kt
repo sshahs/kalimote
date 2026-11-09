@@ -308,10 +308,18 @@ class RemoteClient(
                 update { it.copy(volume = Volume(v.int(7), v.int(6), v.bool(8))) }
             }
             msg.has(Remote.IME_KEY_INJECT) -> {
-                val app = msg.message(Remote.IME_KEY_INJECT)?.message(1)?.string(12)
-                // A different app has no text box waiting for us any more.
-                if (!app.isNullOrEmpty()) {
-                    update { if (it.currentApp == app) it else it.copy(currentApp = app, textField = null) }
+                // Sent when an app starts taking input. With a text field status
+                // (field 2: counter, value, ..., label) a text box has focus: this is
+                // how the Android TV Remote Service announces it (seen on LineageOS
+                // ATV); the counters for our edits follow in IME_BATCH_EDIT messages.
+                val inject = msg.message(Remote.IME_KEY_INJECT) ?: return false
+                val app = inject.message(1)?.string(12)?.takeIf { it.isNotEmpty() }
+                val status = inject.message(2)
+                val field = status?.let { TextField(++fieldSeq, it.string(2), it.string(6)) }
+                update { s ->
+                    // A different app has no text box waiting for us any more.
+                    val next = if (app != null && app != s.currentApp) s.copy(currentApp = app, textField = null) else s
+                    if (field != null) next.copy(textField = field) else next
                 }
             }
             msg.has(Remote.IME_BATCH_EDIT) -> {
@@ -329,6 +337,9 @@ class RemoteClient(
                         val field = s.textField ?: if (echo) null else TextField(++fieldSeq, value)
                         s.copy(textField = field?.copy(value = value))
                     }
+                } else if (value == null && pending == null) {
+                    // Counters alone: an input session is open, so edits can go through it.
+                    update { s -> if (s.textField != null) s else s.copy(textField = TextField(++fieldSeq)) }
                 }
             }
             msg.has(Remote.IME_SHOW_REQUEST) -> {
